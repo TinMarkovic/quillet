@@ -1,0 +1,29 @@
+{% extends "quillet/base.html" %}
+
+{% block title %}
+  {% if state == 'confirmed' %}Subscribed!
+  {% elif state == 'pending' %}Check your email
+  {% elif state == 'unsubscribed' %}Unsubscribed
+  {% else %}Invalid link
+  {% endif %} — {{ newsletter.name }}
+{% endblock %}
+
+{% block content %}
+  {% if state == 'pending' %}
+    <h1>Check your email</h1>
+    <p>We've sent a confirmation link to your address. Click it to complete your subscription to <strong>{{ newsletter.name }}</strong>.</p>
+
+  {% elif state == 'confirmed' %}
+    <h1>You're subscribed!</h1>
+    <p>Welcome to <strong>{{ newsletter.name }}</strong>. You'll receive future posts by email.</p>
+    <p><a href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">Browse the archive →</a></p>
+
+  {% elif state == 'unsubscribed' %}
+    <h1>Unsubscribed</h1>
+    <p>You've been removed from <strong>{{ newsletter.name }}</strong>. You won't receive any more emails.</p>
+
+  {% else %}
+    <h1>Invalid link</h1>
+    <p>This confirmation link is invalid or has already been used.</p>
+  {% endif %}
+{% endblock %}

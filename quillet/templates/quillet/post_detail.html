@@ -1,0 +1,20 @@
+{% extends "quillet/base.html" %}
+
+{% block title %}{{ post.title }} — {{ newsletter.name }}{% endblock %}
+
+{% block content %}
+<p class="muted">
+  <a href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">← {{ newsletter.name }}</a>
+  {% if post.published_at %} · {{ post.published_at.strftime('%B %d, %Y') }}{% endif %}
+</p>
+
+<h1>{{ post.title }}</h1>
+
+<div class="prose">{{ post_html | safe }}</div>
+
+<hr>
+<p class="muted">
+  Enjoyed this? <a href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">Subscribe</a>
+  to get future posts by email.
+</p>
+{% endblock %}

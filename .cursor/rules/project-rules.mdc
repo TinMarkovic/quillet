@@ -1,0 +1,41 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Write code that is robust.
+Write code that is pragmatic.
+Do not overexplain.
+Focus on performance and simplicity, use high level abstractions.
+Always try to find a ready-made solution.
+Always search for existing implementations and use existing project patterns.
+Make sure you never reimplement an existing pattern without approval.
+We are writing well behaved Python code with latest standards. 
+We apply typing to function arguments and returns.
+We prefer to invert conditionals and exit, when possible, example:
+```
+# Bad:
+if user:
+    # logic
+else:
+    raise Exception("No user")
+
+# Good:
+if not user:
+    raise Exception("No user")
+# logic
+```
+We prefer to de-indent code where it is possible.
+We prefer to use list comprehension.
+We prefer to define NamedTuple instead of using dictionaries for data structures.
+We prefer immutable structures (NamedTuple, frozen dataclasses, etc.) where mutation is unnecessary.
+We prefer to keep functions short, up to 15 semantic lines.
+We use generous whitespace and blank lines to group code logically and enhance readability.
+We prefer to be explicit and verbose instead of using short variable names.
+We prefer specific exceptions and avoid catching broad Exception unless justified.
+We only import at the top of the module, outside functions. If importing inside a function is absolutely necessary (e.g., for type-checking or avoiding circular imports), the exception must be documented clearly.
+We use relative imports for our code.
+We import smallest possible units: `from foo import bar` is good. `import foo; foo.bar()` is to be avoided.
+We avoid defining classes ONLY TO encapsulate methods, we rely on Python's modules.
+We avoid commenting self-explanatory code, our comments are focused to docstrings (in functions) and to large scope explanations.
+We avoid deep nesting (e.g., >2 levels). Break into smaller functions when needed.

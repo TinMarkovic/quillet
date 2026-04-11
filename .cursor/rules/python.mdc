@@ -1,0 +1,12 @@
+---
+alwaysApply: true
+---
+# Python Edit Policy
+
+After every edit to a `.py` file, run `read_lints` on the `tinthe/` directory and fix any
+errors before considering the task done. Never hand back to the user with outstanding lint errors.
+
+Common mistakes to watch for in this codebase:
+- Stale imports after feature removal (e.g. removing a route but leaving its `import`)
+- Passing a `Path` object to a function that calls string methods (`.split`, `[0]`, etc.) — always check the type the callee expects
+- Bare relative imports like `from foo import ...` instead of `from .foo import ...` inside the `tinthe` package

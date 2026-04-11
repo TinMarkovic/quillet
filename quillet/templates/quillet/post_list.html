@@ -1,0 +1,33 @@
+{% extends "quillet/base.html" %}
+
+{% block content %}
+<h1>{{ newsletter.name }}</h1>
+
+{% if posts %}
+  <ul style="list-style:none;padding:0;">
+    {% for post in posts %}
+    <li style="margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:1px solid #eee;">
+      <a href="{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+        <strong>{{ post.title }}</strong>
+      </a>
+      {% if post.published_at %}
+        <span class="muted"> — {{ post.published_at.strftime('%b %d, %Y') }}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="muted">No posts yet.</p>
+{% endif %}
+
+<hr>
+<h2>Subscribe</h2>
+{% if subscribe_error %}
+  <p style="color:#cc0000;">{{ subscribe_error }}</p>
+{% endif %}
+<form class="subscribe-form" method="post"
+      action="{{ url_for('quillet.subscribe', newsletter_slug=newsletter.slug) }}">
+  <input type="email" name="email" placeholder="your@email.com" required>
+  <button type="submit">Subscribe</button>
+</form>
+{% endblock %}

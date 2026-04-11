@@ -1,0 +1,55 @@
+{% extends "quillet/base.html" %}
+
+{% block title %}Subscribers — {{ newsletter.name }}{% endblock %}
+
+{% block head %}
+<style>
+  table { width: 100%; border-collapse: collapse; font-size: 0.95em; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; }
+  th { background: #f5f5f5; font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<p class="muted">
+  <a href="{{ url_for('quillet.dashboard', newsletter_slug=newsletter.slug) }}">← Dashboard</a>
+</p>
+
+<h1>Subscribers</h1>
+
+{% set confirmed = subscribers | selectattr('confirmed_at') | list %}
+<p class="muted">
+  {{ confirmed | length }} confirmed of {{ subscribers | length }} total
+</p>
+
+{% if subscribers %}
+<table>
+  <thead>
+    <tr>
+      <th>Email</th>
+      <th>Status</th>
+      <th>Since</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for sub in subscribers %}
+    <tr>
+      <td>{{ sub.email }}</td>
+      <td>
+        {% if sub.confirmed_at %}
+          <span class="badge badge-published">Confirmed</span>
+        {% else %}
+          <span class="badge badge-draft">Pending</span>
+        {% endif %}
+      </td>
+      <td class="muted">
+        {{ sub.confirmed_at.strftime('%b %d, %Y') if sub.confirmed_at else '—' }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p class="muted">No subscribers yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,76 @@
+{% extends "quillet/base.html" %}
+
+{% block title %}Admin — {{ newsletter.name }}{% endblock %}
+
+{% block head %}
+<style>
+  table { width: 100%; border-collapse: collapse; font-size: 0.95em; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; }
+  th { background: #f5f5f5; font-weight: 600; }
+  .actions form { display: inline; }
+  .actions button { padding: 0.25rem 0.6rem; font-size: 0.85em; border: none; border-radius: 3px; cursor: pointer; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
+  <h1>{{ newsletter.name }}</h1>
+  <a class="btn" href="{{ url_for('quillet.new_post', newsletter_slug=newsletter.slug) }}">+ New post</a>
+</div>
+
+<p class="muted">
+  {{ confirmed_count }} confirmed subscriber{{ 's' if confirmed_count != 1 }} ·
+  <a href="{{ url_for('quillet.subscriber_list', newsletter_slug=newsletter.slug) }}">manage subscribers</a>
+</p>
+
+{% if posts %}
+<table>
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Status</th>
+      <th>Published</th>
+      <th class="actions">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for post in posts %}
+    <tr>
+      <td>
+        <a href="{{ url_for('quillet.edit_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+          {{ post.title }}
+        </a>
+      </td>
+      <td>
+        {% if post.sent_at %}
+          <span class="badge badge-sent">Sent</span>
+        {% elif post.published_at %}
+          <span class="badge badge-published">Published</span>
+        {% else %}
+          <span class="badge badge-draft">Draft</span>
+        {% endif %}
+      </td>
+      <td class="muted">
+        {{ post.published_at.strftime('%b %d, %Y') if post.published_at else '—' }}
+      </td>
+      <td class="actions">
+        {% if not post.published_at %}
+          <form method="post" action="{{ url_for('quillet.publish_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+            <button class="btn" type="submit">Publish</button>
+          </form>
+        {% endif %}
+        {% if post.published_at and not post.sent_at %}
+          <form method="post" action="{{ url_for('quillet.send_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}"
+                onsubmit="return confirm('Send to {{ confirmed_count }} subscriber(s)?')">
+            <button class="btn" type="submit" style="background:#28a745;">Send</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p class="muted">No posts yet. <a href="{{ url_for('quillet.new_post', newsletter_slug=newsletter.slug) }}">Create one →</a></p>
+{% endif %}
+{% endblock %}

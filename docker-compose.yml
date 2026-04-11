@@ -1,0 +1,30 @@
+services:
+  quillet:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - quillet_data:/data
+      # Uncomment to override templates:
+      # - ./my-templates:/app/templates/quillet
+    environment:
+      QUILLET_MODE: web
+      QUILLET_ADMIN_PASSWORD: changeme
+      QUILLET_ADMIN_UI: "true"
+      QUILLET_DB_BACKEND: sqlalchemy
+      QUILLET_DB_URL: sqlite:////data/quillet.db
+      QUILLET_EMAIL_BACKEND: smtp
+      QUILLET_SMTP_HOST: mailhog
+      QUILLET_SMTP_PORT: "1025"
+      QUILLET_SMTP_FROM_EMAIL: newsletter@example.com
+      QUILLET_SMTP_FROM_NAME: My Newsletter
+      QUILLET_BASE_URL: http://localhost:8000
+
+  # Optional local SMTP for dev; remove in production.
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "8025:8025"
+
+volumes:
+  quillet_data:
