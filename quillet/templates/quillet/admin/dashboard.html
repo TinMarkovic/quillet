@@ -66,7 +66,8 @@
           </form>
         {% endif %}
         <form method="post" action="{{ url_for('quillet.delete_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}"
-              onsubmit="return confirm('{% if post.sent_at %}This post was already sent. Delete anyway?{% else %}Delete "{{ post.title }}"?{% endif %}')">
+              data-confirm="{% if post.sent_at %}This post was already sent. Delete anyway?{% else %}Delete this post?{% endif %}"
+              onsubmit="return confirm(this.dataset.confirm)">
           <button class="btn btn-danger" type="submit">Delete</button>
         </form>
       </td>

@@ -55,7 +55,7 @@ class MailgunSender:
                 "from": self._from_field(newsletter.from_name),
                 "h:Reply-To": newsletter.from_email,
                 "to": subscriber.email,
-                "subject": f"Confirm your subscription to {newsletter.name}",
+                "subject": self._subject(f"Confirm your subscription to {newsletter.name}"),
                 "text": (
                     f"Hi,\n\nPlease confirm your subscription to {newsletter.name} "
                     f"by clicking the link below:\n\n{confirm_url}\n\n"

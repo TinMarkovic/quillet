@@ -53,9 +53,10 @@ class SmtpSender:
         confirm_url: str,
     ) -> None:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"Confirm your subscription to {newsletter.name}"
+        msg["Subject"] = self._subject(f"Confirm your subscription to {newsletter.name}")
         msg["From"] = self._from_field()
         msg["To"] = subscriber.email
+        msg["Reply-To"] = newsletter.from_email
 
         text = (
             f"Hi,\n\nPlease confirm your subscription to {newsletter.name} "
