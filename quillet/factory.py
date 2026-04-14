@@ -186,6 +186,8 @@ def _build_email() -> EmailSender:
             api_key=os.environ["QUILLET_MAILGUN_API_KEY"],
             domain=os.environ["QUILLET_MAILGUN_DOMAIN"],
             region=os.environ.get("QUILLET_MAILGUN_REGION", "us"),
+            sender_email=os.environ.get("QUILLET_MAILGUN_SENDER_EMAIL") or None,
+            subject_prefix=os.environ.get("QUILLET_SUBJECT_PREFIX", ""),
         )
 
     if backend == "noop":
@@ -205,6 +207,7 @@ def _build_email() -> EmailSender:
             username=os.environ.get("QUILLET_SMTP_USERNAME") or None,
             password=os.environ.get("QUILLET_SMTP_PASSWORD") or None,
             use_tls=use_tls_raw not in ("false", "0", "no"),
+            subject_prefix=os.environ.get("QUILLET_SUBJECT_PREFIX", ""),
         )
 
     raise ValueError(f"Unknown QUILLET_EMAIL_BACKEND: {backend!r}. Use 'mailgun', 'smtp', or 'noop'.")

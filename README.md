@@ -89,6 +89,8 @@ Visit `http://localhost:8000`. Configure via environment variables:
 | `QUILLET_MAILGUN_API_KEY` | — | Mailgun private API key |
 | `QUILLET_MAILGUN_DOMAIN` | — | Mailgun sending domain |
 | `QUILLET_MAILGUN_REGION` | `us` | Mailgun region — `us` or `eu` |
+| `QUILLET_MAILGUN_SENDER_EMAIL` | `quillet@<domain>` | Envelope From address (must be on your Mailgun domain for SPF/DKIM to pass) |
+| `QUILLET_SUBJECT_PREFIX` | *(empty)* | Prepended to every post subject line, e.g. `[My Blog] ` |
 | `QUILLET_SMTP_HOST` | `localhost` | SMTP host |
 | `QUILLET_SMTP_PORT` | `587` | SMTP port |
 | `QUILLET_SMTP_USE_TLS` | `true` | Set `false` for local dev (e.g. Mailhog) |

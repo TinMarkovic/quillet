@@ -16,6 +16,7 @@ class SmtpSender:
         username: str | None = None,
         password: str | None = None,
         use_tls: bool = True,
+        subject_prefix: str = "",
     ) -> None:
         self._from_email = from_email
         self._from_name = from_name
@@ -24,11 +25,15 @@ class SmtpSender:
         self._username = username
         self._password = password
         self._use_tls = use_tls
+        self._subject_prefix = subject_prefix
 
     def _from_field(self) -> str:
         if self._from_name:
             return f"{self._from_name} <{self._from_email}>"
         return self._from_email
+
+    def _subject(self, title: str) -> str:
+        return f"{self._subject_prefix}{title}" if self._subject_prefix else title
 
     def _connect(self) -> smtplib.SMTP:
         smtp = smtplib.SMTP(self._host, self._port)
@@ -92,7 +97,7 @@ class SmtpSender:
                 unsubscribe_url = unsubscribe_url_template.format(token=subscriber.token)
 
                 msg = MIMEMultipart("alternative")
-                msg["Subject"] = post.title
+                msg["Subject"] = self._subject(post.title)
                 msg["From"] = self._from_field()
                 msg["To"] = subscriber.email
                 msg["Reply-To"] = reply_to

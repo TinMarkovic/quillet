@@ -30,4 +30,7 @@
   <input type="email" name="email" placeholder="your@email.com" required>
   <button type="submit">Subscribe</button>
 </form>
+<p class="muted" style="margin-top:0.75rem;font-size:0.85em;">
+  <a href="{{ url_for('quillet.feed', newsletter_slug=newsletter.slug) }}">RSS feed</a>
+</p>
 {% endblock %}

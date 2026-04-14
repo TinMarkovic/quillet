@@ -12,12 +12,21 @@ _MAILGUN_API_BASES = {
 
 
 class MailgunSender:
-    def __init__(self, api_key: str, domain: str, region: str = "us") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        domain: str,
+        region: str = "us",
+        sender_email: str | None = None,
+        subject_prefix: str = "",
+    ) -> None:
         if region not in _MAILGUN_API_BASES:
             raise ValueError(f"Unknown Mailgun region {region!r}. Use 'us' or 'eu'.")
         self._api_key = api_key
         self._domain = domain
         self._api_base = _MAILGUN_API_BASES[region]
+        self._sender_email = sender_email or f"quillet@{domain}"
+        self._subject_prefix = subject_prefix
 
     def _post(self, endpoint: str, data: dict) -> None:
         resp = requests.post(
@@ -28,17 +37,23 @@ class MailgunSender:
         )
         resp.raise_for_status()
 
+    def _from_field(self, display_name: str) -> str:
+        return f"{display_name} <{self._sender_email}>"
+
+    def _subject(self, title: str) -> str:
+        return f"{self._subject_prefix}{title}" if self._subject_prefix else title
+
     def send_confirmation(
         self,
         newsletter: Newsletter,
         subscriber: Subscriber,
         confirm_url: str,
     ) -> None:
-        from_field = f"{newsletter.from_name} <{newsletter.from_email}>"
         self._post(
             "messages",
             {
-                "from": from_field,
+                "from": self._from_field(newsletter.from_name),
+                "h:Reply-To": newsletter.from_email,
                 "to": subscriber.email,
                 "subject": f"Confirm your subscription to {newsletter.name}",
                 "text": (
@@ -70,7 +85,6 @@ class MailgunSender:
         if not subscribers:
             return
 
-        from_field = f"{newsletter.from_name} <{newsletter.from_email}>"
         reply_to = newsletter.reply_to or newsletter.from_email
 
         recipient_variables = {
@@ -83,16 +97,16 @@ class MailgunSender:
         self._post(
             "messages",
             {
-                "from": from_field,
+                "from": self._from_field(newsletter.from_name),
+                "h:Reply-To": reply_to,
                 "to": [sub.email for sub in subscribers],
-                "subject": post.title,
+                "subject": self._subject(post.title),
                 "text": (f"{md_to_plain(post.body_md)}\n\n" "---\n" "Unsubscribe: %recipient.unsubscribe_url%"),
                 "html": (
                     f"{md_to_html(post.body_md)}"
                     "<hr>"
                     '<p><small><a href="%recipient.unsubscribe_url%">Unsubscribe</a></small></p>'
                 ),
-                "h:Reply-To": reply_to,
                 "recipient-variables": json.dumps(recipient_variables),
             },
         )
