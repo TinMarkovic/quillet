@@ -3,7 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {%- set _description %}{% block description %}{% endblock %}{% endset -%}
+  {%- set _canonical %}{% block canonical %}{% endblock %}{% endset -%}
   <title>{% block title %}{{ newsletter.name }}{% endblock %}</title>
+  <meta property="og:title" content="{{ self.title() | trim }}">
+  <meta property="og:type" content="{% block og_type %}website{% endblock %}">
+  <meta name="twitter:card" content="summary">
+  {%- if _description | trim %}
+  <meta name="description" content="{{ _description | trim }}">
+  <meta property="og:description" content="{{ _description | trim }}">
+  <meta name="twitter:description" content="{{ _description | trim }}">
+  {%- endif %}
+  {%- if _canonical | trim %}
+  <link rel="canonical" href="{{ _canonical | trim }}">
+  <meta property="og:url" content="{{ _canonical | trim }}">
+  {%- endif %}
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; max-width: 680px; margin: 2rem auto; padding: 0 1rem; color: #111; line-height: 1.6; }

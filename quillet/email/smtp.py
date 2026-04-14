@@ -3,7 +3,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from ..models import Newsletter, Post, Subscriber
-from ._utils import md_to_plain
+from ._utils import md_to_html, md_to_plain
 
 
 class SmtpSender:
@@ -99,7 +99,7 @@ class SmtpSender:
 
                 text = f"{md_to_plain(post.body_md)}\n\n---\nUnsubscribe: {unsubscribe_url}"
                 html = (
-                    f"<div>{post.body_md}</div>"
+                    f"{md_to_html(post.body_md)}"
                     "<hr>"
                     f'<p><small><a href="{unsubscribe_url}">Unsubscribe</a></small></p>'
                 )

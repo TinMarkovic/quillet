@@ -4,6 +4,8 @@ All runtime configuration (DB, email, mode) is wired here.
 """
 
 import os
+from datetime import timezone
+from email.utils import format_datetime as _fmt_datetime
 
 from flask import Blueprint, Flask
 
@@ -11,6 +13,18 @@ from .cli import quillet_cli
 from .db import NewsletterRepository
 from .email import EmailSender
 from .models import Newsletter
+
+
+def _wordcount_filter(text: str) -> int:
+    return len(text.split())
+
+
+def _rfc2822_filter(dt) -> str:
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return _fmt_datetime(dt)
 
 
 def get_or_create_newsletter(
@@ -74,6 +88,9 @@ def create_blueprint(
     from .routes import register_public_routes
 
     bp = Blueprint(name, __name__, template_folder="templates")
+
+    bp.add_app_template_filter(_wordcount_filter, "wordcount")
+    bp.add_app_template_filter(_rfc2822_filter, "rfc2822")
 
     @bp.record_once
     def _on_register(state):

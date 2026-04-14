@@ -1,11 +1,15 @@
 {% extends "quillet/base.html" %}
 
 {% block title %}{{ post.title }} — {{ newsletter.name }}{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block description %}{{ post_html | striptags | truncate(160, killwords=False, end='') | trim }}{% endblock %}
+{% block canonical %}{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug, _external=True) }}{% endblock %}
 
 {% block content %}
 <p class="muted">
   <a href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">← {{ newsletter.name }}</a>
   {% if post.published_at %} · {{ post.published_at.strftime('%B %d, %Y') }}{% endif %}
+  · {{ [1, ((post_html | striptags | wordcount) / 200) | round | int] | max }} min read
 </p>
 
 <h1>{{ post.title }}</h1>

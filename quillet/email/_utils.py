@@ -9,3 +9,8 @@ def md_to_plain(md: str) -> str:
     text = re.sub(r"<[^>]+>", "", html)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def md_to_html(md: str) -> str:
+    """Render markdown to HTML for email HTML parts (same extras as the web view)."""
+    return markdown2.markdown(md, extras=["header-ids", "strike", "metadata"])

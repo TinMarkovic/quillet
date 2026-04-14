@@ -3,7 +3,7 @@ import json
 import requests
 
 from ..models import Newsletter, Post, Subscriber
-from ._utils import md_to_plain
+from ._utils import md_to_html, md_to_plain
 
 _MAILGUN_API_BASES = {
     "us": "https://api.mailgun.net/v3",
@@ -92,7 +92,7 @@ class MailgunSender:
                     "Unsubscribe: %recipient.unsubscribe_url%"
                 ),
                 "html": (
-                    f"<div>{post.body_md}</div>"
+                    f"{md_to_html(post.body_md)}"
                     "<hr>"
                     '<p><small><a href="%recipient.unsubscribe_url%">Unsubscribe</a></small></p>'
                 ),

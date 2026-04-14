@@ -183,6 +183,36 @@ def register_public_routes(bp: Blueprint) -> None:
             state="unsubscribed",
         )
 
+    @bp.get("/<newsletter_slug>/feed.xml")
+    def feed(newsletter_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        posts = _db().list_posts(newsletter_slug, published_only=True)
+        base = _base_url()
+
+        items = [
+            (
+                post,
+                _render_post_html(post),
+                urljoin(base, url_for(f"{name}.post_detail", newsletter_slug=newsletter_slug, post_slug=post.slug)),
+            )
+            for post in posts
+        ]
+
+        channel_url = urljoin(base, url_for(f"{name}.post_list", newsletter_slug=newsletter_slug))
+        feed_url = urljoin(base, url_for(f"{name}.feed", newsletter_slug=newsletter_slug))
+
+        xml = render_template(
+            "quillet/feed.xml",
+            newsletter=newsletter,
+            items=items,
+            channel_url=channel_url,
+            feed_url=feed_url,
+        )
+        return current_app.response_class(xml, mimetype="application/rss+xml")
+
     # --- API admin routes (always JSON, always Basic Auth) ---
 
     @bp.post("/<newsletter_slug>/api/posts")

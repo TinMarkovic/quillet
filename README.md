@@ -124,6 +124,7 @@ All routes are prefixed with `/<newsletter_slug>/`.
 | `POST` | `/<slug>/subscribe` | Subscribe. Accepts form `email` or JSON `{"email": "..."}`. Sends double opt-in email. |
 | `GET` | `/<slug>/confirm/<token>` | Confirm subscription via emailed link. |
 | `GET` | `/<slug>/unsubscribe/<token>` | Unsubscribe via emailed link. |
+| `GET` | `/<slug>/feed.xml` | RSS 2.0 feed of published posts. |
 
 ### Admin browser UI (Basic Auth)
 
@@ -265,6 +266,27 @@ volumes:
 | `admin/subscribers.html` | `newsletter`, `subscribers` |
 
 All model fields are accessible as attributes (e.g. `newsletter.name`, `post.title`, `post.published_at`).
+
+### Template blocks
+
+`base.html` defines the following overridable blocks:
+
+| Block | Default | Notes |
+|---|---|---|
+| `title` | `newsletter.name` | Also used as `og:title` |
+| `description` | *(empty)* | Populates `<meta name="description">` and OG/Twitter tags when non-empty |
+| `canonical` | *(empty)* | Populates `<link rel="canonical">` and `og:url` when non-empty |
+| `og_type` | `website` | Override to `article` on post pages |
+| `head` | *(empty)* | Extra content inside `<head>` (styles, scripts) |
+| `content` | *(empty)* | Page body |
+
+`post_detail.html` sets `description` (first 160 chars of body text), `canonical` (absolute post URL), and `og_type` (`article`) automatically.
+
+A `wordcount` Jinja2 filter is registered on the app, so you can use reading-time estimates in any template override:
+
+```html
+{{ [1, ((post_html | striptags | wordcount) / 200) | round | int] | max }} min read
+```
 
 ---
 
