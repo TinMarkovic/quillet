@@ -18,6 +18,7 @@ class MailgunSender:
         domain: str,
         region: str = "us",
         sender_email: str | None = None,
+        sender_name: str | None = None,
         subject_prefix: str = "",
     ) -> None:
         if region not in _MAILGUN_API_BASES:
@@ -26,6 +27,7 @@ class MailgunSender:
         self._domain = domain
         self._api_base = _MAILGUN_API_BASES[region]
         self._sender_email = sender_email or f"quillet@{domain}"
+        self._sender_name = sender_name
         self._subject_prefix = subject_prefix
 
     def _post(self, endpoint: str, data: dict) -> None:
@@ -38,7 +40,8 @@ class MailgunSender:
         resp.raise_for_status()
 
     def _from_field(self, display_name: str) -> str:
-        return f"{display_name} <{self._sender_email}>"
+        name = self._sender_name or display_name
+        return f"{name} <{self._sender_email}>"
 
     def _subject(self, title: str) -> str:
         return f"{self._subject_prefix}{title}" if self._subject_prefix else title

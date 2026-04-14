@@ -90,6 +90,7 @@ Visit `http://localhost:8000`. Configure via environment variables:
 | `QUILLET_MAILGUN_DOMAIN` | — | Mailgun sending domain |
 | `QUILLET_MAILGUN_REGION` | `us` | Mailgun region — `us` or `eu` |
 | `QUILLET_MAILGUN_SENDER_EMAIL` | `quillet@<domain>` | Envelope From address (must be on your Mailgun domain for SPF/DKIM to pass) |
+| `QUILLET_MAILGUN_SENDER_NAME` | *(newsletter's from_name)* | Display name shown in the From field; defaults to the newsletter's own name |
 | `QUILLET_SUBJECT_PREFIX` | *(empty)* | Prepended to every post subject line, e.g. `[My Blog] ` |
 | `QUILLET_SMTP_HOST` | `localhost` | SMTP host |
 | `QUILLET_SMTP_PORT` | `587` | SMTP port |

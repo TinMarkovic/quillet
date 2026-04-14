@@ -187,6 +187,7 @@ def _build_email() -> EmailSender:
             domain=os.environ["QUILLET_MAILGUN_DOMAIN"],
             region=os.environ.get("QUILLET_MAILGUN_REGION", "us"),
             sender_email=os.environ.get("QUILLET_MAILGUN_SENDER_EMAIL") or None,
+            sender_name=os.environ.get("QUILLET_MAILGUN_SENDER_NAME") or None,
             subject_prefix=os.environ.get("QUILLET_SUBJECT_PREFIX", ""),
         )
 
