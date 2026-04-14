@@ -86,11 +86,7 @@ class MailgunSender:
                 "from": from_field,
                 "to": [sub.email for sub in subscribers],
                 "subject": post.title,
-                "text": (
-                    f"{md_to_plain(post.body_md)}\n\n"
-                    "---\n"
-                    "Unsubscribe: %recipient.unsubscribe_url%"
-                ),
+                "text": (f"{md_to_plain(post.body_md)}\n\n" "---\n" "Unsubscribe: %recipient.unsubscribe_url%"),
                 "html": (
                     f"{md_to_html(post.body_md)}"
                     "<hr>"
