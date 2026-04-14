@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "quillet"
-version = "0.1.0"
+version = "0.2.0"
 description = "Flask newsletter + microblog package. Importable Blueprint, standalone web app, or headless API."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["flask", "newsletter", "microblog", "email"]
 classifiers = [
@@ -15,6 +15,7 @@ classifiers = [
     "Framework :: Flask",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -45,4 +46,4 @@ select = ["E", "F", "W", "I"]
 
 [tool.black]
 line-length = 120
-target-version = ["py311", "py312"]
+target-version = ["py310", "py311", "py312"]
