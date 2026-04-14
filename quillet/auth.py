@@ -7,8 +7,9 @@ from flask import Response, current_app, request
 
 
 def _check_credentials(username: str, password: str) -> bool:
+    expected_username = current_app.config.get("QUILLET_ADMIN_USERNAME", "admin")
     expected_password = current_app.config.get("QUILLET_ADMIN_PASSWORD", "")
-    return username == "admin" and password == expected_password
+    return username == expected_username and password == expected_password
 
 
 def require_basic_auth(view: Callable) -> Callable:

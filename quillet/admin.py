@@ -161,6 +161,20 @@ def register_admin_routes(bp: Blueprint) -> None:
 
         return redirect(url_for(f"{name}.dashboard", newsletter_slug=newsletter_slug))
 
+    @bp.post("/<newsletter_slug>/admin/posts/<post_slug>/delete")
+    @require_basic_auth
+    def delete_post(newsletter_slug: str, post_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        post = _db().get_post(newsletter_slug, post_slug)
+        if post is None:
+            abort(404)
+
+        _db().delete_post(post.id)
+        return redirect(url_for(f"{name}.dashboard", newsletter_slug=newsletter_slug))
+
     @bp.get("/<newsletter_slug>/admin/subscribers")
     @require_basic_auth
     def subscriber_list(newsletter_slug: str):
@@ -174,3 +188,13 @@ def register_admin_routes(bp: Blueprint) -> None:
             newsletter=newsletter,
             subscribers=subscribers,
         )
+
+    @bp.post("/<newsletter_slug>/admin/subscribers/<int:subscriber_id>/delete")
+    @require_basic_auth
+    def delete_subscriber(newsletter_slug: str, subscriber_id: int):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        _db().delete_subscriber(subscriber_id)
+        return redirect(url_for(f"{name}.subscriber_list", newsletter_slug=newsletter_slug))

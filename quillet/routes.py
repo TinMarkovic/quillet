@@ -252,3 +252,27 @@ def register_public_routes(bp: Blueprint) -> None:
 
         subscribers = _db().list_all_subscribers(newsletter_slug)
         return jsonify(subscribers=[s._asdict() for s in subscribers])
+
+    @bp.delete("/<newsletter_slug>/api/posts/<post_slug>")
+    @require_basic_auth
+    def api_delete_post(newsletter_slug: str, post_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        post = _db().get_post(newsletter_slug, post_slug)
+        if post is None:
+            abort(404)
+
+        _db().delete_post(post.id)
+        return jsonify(ok=True)
+
+    @bp.delete("/<newsletter_slug>/api/subscribers/<int:subscriber_id>")
+    @require_basic_auth
+    def api_delete_subscriber(newsletter_slug: str, subscriber_id: int):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        _db().delete_subscriber(subscriber_id)
+        return jsonify(ok=True)

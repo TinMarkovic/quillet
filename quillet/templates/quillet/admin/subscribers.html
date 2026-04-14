@@ -29,6 +29,7 @@
       <th>Email</th>
       <th>Status</th>
       <th>Since</th>
+      <th></th>
     </tr>
   </thead>
   <tbody>
@@ -44,6 +45,12 @@
       </td>
       <td class="muted">
         {{ sub.confirmed_at.strftime('%b %d, %Y') if sub.confirmed_at else '—' }}
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('quillet.delete_subscriber', newsletter_slug=newsletter.slug, subscriber_id=sub.id) }}"
+              onsubmit="return confirm('Remove {{ sub.email }}?')">
+          <button class="btn btn-danger" type="submit" style="padding:0.2rem 0.5rem;font-size:0.8em;">Remove</button>
+        </form>
       </td>
     </tr>
     {% endfor %}

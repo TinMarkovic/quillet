@@ -65,6 +65,10 @@
             <button class="btn" type="submit" style="background:#28a745;">Send</button>
           </form>
         {% endif %}
+        <form method="post" action="{{ url_for('quillet.delete_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}"
+              onsubmit="return confirm('{% if post.sent_at %}This post was already sent. Delete anyway?{% else %}Delete "{{ post.title }}"?{% endif %}')">
+          <button class="btn btn-danger" type="submit">Delete</button>
+        </form>
       </td>
     </tr>
     {% endfor %}

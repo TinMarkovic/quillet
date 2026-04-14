@@ -184,6 +184,10 @@ class SQLAlchemyRepository:
         with self._engine.begin() as conn:
             conn.execute(update(_posts).where(_posts.c.id == post_id).values(sent_at=datetime.now(timezone.utc)))
 
+    def delete_post(self, post_id: int) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(_posts.delete().where(_posts.c.id == post_id))
+
     # --- Subscribers ---
 
     def add_subscriber(self, newsletter_slug: str, email: str, token: str) -> Subscriber:
@@ -244,3 +248,7 @@ class SQLAlchemyRepository:
     def unsubscribe(self, token: str) -> None:
         with self._engine.begin() as conn:
             conn.execute(update(_subscribers).where(_subscribers.c.token == token).values(unsubscribed=True))
+
+    def delete_subscriber(self, subscriber_id: int) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(_subscribers.delete().where(_subscribers.c.id == subscriber_id))

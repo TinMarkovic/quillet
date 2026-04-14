@@ -78,6 +78,16 @@ class SupabaseRestRepository:
             raise ValueError(f"No rows updated in {table} for {match}")
         return rows[0] if isinstance(rows, list) else rows
 
+    def _delete(self, table: str, match: dict) -> None:
+        params = {k: f"eq.{v}" for k, v in match.items()}
+        resp = requests.delete(
+            f"{self._url}/rest/v1/{table}",
+            headers=self._headers,
+            params=params,
+            timeout=10,
+        )
+        resp.raise_for_status()
+
     def _row_to_newsletter(self, row: dict) -> Newsletter:
         return Newsletter(
             id=row["id"],
@@ -180,6 +190,9 @@ class SupabaseRestRepository:
         now = _fmt_dt(datetime.now(timezone.utc))
         self._patch("posts", {"id": post_id}, {"sent_at": now})
 
+    def delete_post(self, post_id: int) -> None:
+        self._delete("posts", {"id": post_id})
+
     # --- Subscribers ---
 
     def add_subscriber(self, newsletter_slug: str, email: str, token: str) -> Subscriber:
@@ -226,3 +239,6 @@ class SupabaseRestRepository:
 
     def unsubscribe(self, token: str) -> None:
         self._patch("subscribers", {"token": token}, {"unsubscribed": True})
+
+    def delete_subscriber(self, subscriber_id: int) -> None:
+        self._delete("subscribers", {"id": subscriber_id})

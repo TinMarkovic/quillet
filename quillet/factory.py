@@ -10,6 +10,40 @@ from flask import Blueprint, Flask
 from .cli import quillet_cli
 from .db import NewsletterRepository
 from .email import EmailSender
+from .models import Newsletter
+
+
+def get_or_create_newsletter(
+    db: NewsletterRepository,
+    slug: str,
+    name: str,
+    from_email: str,
+    from_name: str = "",
+    reply_to: str | None = None,
+) -> tuple[Newsletter, bool]:
+    """
+    Return ``(newsletter, created)`` — creating the newsletter only if the slug
+    does not already exist.  Safe to call on every app startup.
+
+    Example::
+
+        db = SQLAlchemyRepository("sqlite:///q.db")
+        newsletter, created = get_or_create_newsletter(
+            db, slug="blog", name="My Blog", from_email="hi@example.com"
+        )
+    """
+    existing = db.get_newsletter(slug)
+    if existing is not None:
+        return existing, False
+
+    created = db.create_newsletter(
+        slug=slug,
+        name=name,
+        from_email=from_email,
+        from_name=from_name or name,
+        reply_to=reply_to,
+    )
+    return created, True
 
 
 def create_blueprint(
@@ -20,6 +54,7 @@ def create_blueprint(
     admin_ui: bool = True,
     base_url: str = "",
     name: str = "quillet",
+    admin_username: str = "admin",
 ) -> Blueprint:
     """
     Return a configured Flask Blueprint ready to register.
@@ -46,6 +81,7 @@ def create_blueprint(
         app.config.setdefault("QUILLET_DB", db)
         app.config.setdefault("QUILLET_EMAIL", email)
         app.config.setdefault("QUILLET_ADMIN_PASSWORD", admin_password)
+        app.config.setdefault("QUILLET_ADMIN_USERNAME", admin_username)
         app.config.setdefault("QUILLET_MODE", mode)
         app.config.setdefault("QUILLET_ADMIN_UI", admin_ui)
         app.config.setdefault("QUILLET_BLUEPRINT_NAME", name)
@@ -68,6 +104,7 @@ def create_app() -> Flask:
     mode = os.environ.get("QUILLET_MODE", "web").lower()
     admin_ui = os.environ.get("QUILLET_ADMIN_UI", "true").lower() not in ("false", "0", "no")
     admin_password = os.environ.get("QUILLET_ADMIN_PASSWORD", "")
+    admin_username = os.environ.get("QUILLET_ADMIN_USERNAME", "admin")
     base_url = os.environ.get("QUILLET_BASE_URL", "")
 
     if not admin_password:
@@ -82,6 +119,7 @@ def create_app() -> Flask:
     app.config["QUILLET_DB"] = db
     app.config["QUILLET_EMAIL"] = email
     app.config["QUILLET_ADMIN_PASSWORD"] = admin_password
+    app.config["QUILLET_ADMIN_USERNAME"] = admin_username
     app.config["QUILLET_MODE"] = mode
     app.config["QUILLET_ADMIN_UI"] = admin_ui
     if base_url:
@@ -91,6 +129,7 @@ def create_app() -> Flask:
         db=db,
         email=email,
         admin_password=admin_password,
+        admin_username=admin_username,
         mode=mode,
         admin_ui=admin_ui,
         base_url=base_url,
@@ -129,6 +168,7 @@ def _build_email() -> EmailSender:
         return MailgunSender(
             api_key=os.environ["QUILLET_MAILGUN_API_KEY"],
             domain=os.environ["QUILLET_MAILGUN_DOMAIN"],
+            region=os.environ.get("QUILLET_MAILGUN_REGION", "us"),
         )
 
     if backend == "noop":

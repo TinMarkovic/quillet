@@ -1,18 +1,27 @@
+import json
+
 import requests
 
 from ..models import Newsletter, Post, Subscriber
+from ._utils import md_to_plain
 
-_MAILGUN_API_BASE = "https://api.mailgun.net/v3"
+_MAILGUN_API_BASES = {
+    "us": "https://api.mailgun.net/v3",
+    "eu": "https://api.eu.mailgun.net/v3",
+}
 
 
 class MailgunSender:
-    def __init__(self, api_key: str, domain: str) -> None:
+    def __init__(self, api_key: str, domain: str, region: str = "us") -> None:
+        if region not in _MAILGUN_API_BASES:
+            raise ValueError(f"Unknown Mailgun region {region!r}. Use 'us' or 'eu'.")
         self._api_key = api_key
         self._domain = domain
+        self._api_base = _MAILGUN_API_BASES[region]
 
     def _post(self, endpoint: str, data: dict) -> None:
         resp = requests.post(
-            f"{_MAILGUN_API_BASE}/{self._domain}/{endpoint}",
+            f"{self._api_base}/{self._domain}/{endpoint}",
             auth=("api", self._api_key),
             data=data,
             timeout=30,
@@ -71,15 +80,17 @@ class MailgunSender:
             for sub in subscribers
         }
 
-        import json
-
         self._post(
             "messages",
             {
                 "from": from_field,
                 "to": [sub.email for sub in subscribers],
                 "subject": post.title,
-                "text": (f"{post.body_md}\n\n" "---\n" "Unsubscribe: %recipient.unsubscribe_url%"),
+                "text": (
+                    f"{md_to_plain(post.body_md)}\n\n"
+                    "---\n"
+                    "Unsubscribe: %recipient.unsubscribe_url%"
+                ),
                 "html": (
                     f"<div>{post.body_md}</div>"
                     "<hr>"

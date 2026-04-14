@@ -19,20 +19,26 @@ def _db() -> NewsletterRepository:
 @click.option("--from-name", default="", help="Sender display name.")
 @click.option("--reply-to", default=None, help="Reply-to address.")
 def create_newsletter(name: str, slug: str | None, from_email: str, from_name: str, reply_to: str | None) -> None:
-    """Create a new newsletter."""
+    """Create a new newsletter (idempotent — skips creation if the slug already exists)."""
     import re
+
+    from .factory import get_or_create_newsletter
 
     if not slug:
         slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", name.lower().strip()))
 
-    newsletter = _db().create_newsletter(
+    newsletter, created = get_or_create_newsletter(
+        _db(),
         slug=slug,
         name=name,
         from_email=from_email,
-        from_name=from_name or name,
+        from_name=from_name,
         reply_to=reply_to,
     )
-    click.echo(f"Created newsletter '{newsletter.name}' with slug '{newsletter.slug}'.")
+    if created:
+        click.echo(f"Created newsletter '{newsletter.name}' with slug '{newsletter.slug}'.")
+    else:
+        click.echo(f"Newsletter '{newsletter.name}' (slug '{newsletter.slug}') already exists — nothing changed.")
 
 
 @quillet_cli.command("list")
