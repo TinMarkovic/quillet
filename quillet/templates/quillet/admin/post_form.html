@@ -12,6 +12,10 @@
     width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;
     font-family: inherit; font-size: 1em;
   }
+  input[type=email] {
+    padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;
+    font-family: inherit; font-size: 1em;
+  }
   textarea { font-family: monospace; font-size: 0.9em; min-height: 400px; resize: vertical; }
   .hint { font-size: 0.85em; color: #666; margin-top: 0.2rem; }
   .error { color: #cc0000; padding: 0.75rem; background: #fff0f0; border-radius: 4px; margin-bottom: 1rem; }
@@ -82,6 +86,23 @@
        class="muted" target="_blank">View post ↗</a>
   {% endif %}
 </div>
+
+{% if post %}
+<div style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid #eee;">
+  <form method="post" action="{{ url_for('quillet.send_test_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+    <label for="test_email" style="font-weight:600;display:block;margin-bottom:0.4rem;">Send test email to</label>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <input type="email" id="test_email" name="test_email"
+             value="{{ newsletter.reply_to or newsletter.from_email }}"
+             style="flex:1;">
+      <button type="submit" class="btn">Send test</button>
+    </div>
+    {% if request.args.get('test_sent') %}
+      <p class="hint" style="color:#1a7f37;margin-top:0.4rem;">Test email sent.</p>
+    {% endif %}
+  </form>
+</div>
+{% endif %}
 
 <script>
   const titleInput = document.getElementById('title');

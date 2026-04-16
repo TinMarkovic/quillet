@@ -10,7 +10,7 @@ from flask import (
 )
 
 from .auth import require_basic_auth
-from .models import NewsletterConfig
+from .models import Newsletter, NewsletterConfig, Subscriber
 from .routes import _db, _email, _unsubscribe_url_template
 
 
@@ -252,3 +252,42 @@ def register_admin_routes(bp: Blueprint) -> None:
         _db().save_newsletter_config(config)
 
         return redirect(url_for(f"{name}.settings", newsletter_slug=newsletter.slug, saved="1"))
+
+    @bp.post("/<newsletter_slug>/admin/posts/<post_slug>/send-test")
+    @require_basic_auth
+    def send_test_post(newsletter_slug: str, post_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        post = _db().get_post(newsletter_slug, post_slug)
+        if post is None:
+            abort(404)
+
+        test_email = request.form.get("test_email", "").strip()
+        if not test_email:
+            test_email = newsletter.reply_to or newsletter.from_email
+
+        test_subscriber = Subscriber(
+            id=0,
+            newsletter_id=newsletter.id,
+            email=test_email,
+            token="test",
+            confirmed_at=None,
+        )
+
+        config = _db().get_newsletter_config(newsletter.id)
+        prefix = f"[TEST] {config.subject_prefix or ''}".strip()
+        test_config = config._replace(subject_prefix=prefix)
+
+        _email().send_post(
+            newsletter,
+            post,
+            [test_subscriber],
+            _unsubscribe_url_template(name, newsletter_slug),
+            test_config,
+        )
+
+        return redirect(
+            url_for(f"{name}.edit_post", newsletter_slug=newsletter_slug, post_slug=post_slug, test_sent="1")
+        )
