@@ -10,12 +10,13 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     create_engine,
     select,
     update,
 )
 
-from ..models import Newsletter, Post, Subscriber
+from ..models import CONFIG_DEFAULTS, Newsletter, NewsletterConfig, Post, Subscriber
 
 metadata = MetaData()
 
@@ -53,6 +54,15 @@ _subscribers = Table(
     Column("unsubscribed", Boolean, default=False, nullable=False),
 )
 
+_newsletter_config = Table(
+    "newsletter_config",
+    metadata,
+    Column("newsletter_id", Integer, ForeignKey("newsletters.id"), nullable=False),
+    Column("key", String(128), nullable=False),
+    Column("value", Text, nullable=True),
+    UniqueConstraint("newsletter_id", "key"),
+)
+
 
 def _row_to_newsletter(row) -> Newsletter:
     return Newsletter(
@@ -87,6 +97,17 @@ def _row_to_subscriber(row) -> Subscriber:
     )
 
 
+def _assemble_newsletter_config(newsletter_id: int, rows) -> NewsletterConfig:
+    kv = {row.key: row.value for row in rows}
+    merged = {key: kv.get(key, default) for key, default in CONFIG_DEFAULTS.items()}
+    return NewsletterConfig(
+        newsletter_id=newsletter_id,
+        subject_prefix=merged["subject_prefix"],
+        email_opener=merged["email_opener"],
+        email_footer=merged["email_footer"],
+    )
+
+
 class SQLAlchemyRepository:
     def __init__(self, db_url: str) -> None:
         self._engine = create_engine(db_url)
@@ -114,6 +135,52 @@ class SQLAlchemyRepository:
             )
             row = conn.execute(select(_newsletters).where(_newsletters.c.id == result.inserted_primary_key[0])).one()
         return _row_to_newsletter(row)
+
+    def update_newsletter(
+        self,
+        newsletter_id: int,
+        name: str,
+        from_name: str,
+        from_email: str,
+        reply_to: str | None,
+    ) -> Newsletter:
+        with self._engine.begin() as conn:
+            conn.execute(
+                update(_newsletters)
+                .where(_newsletters.c.id == newsletter_id)
+                .values(name=name, from_name=from_name, from_email=from_email, reply_to=reply_to)
+            )
+            row = conn.execute(select(_newsletters).where(_newsletters.c.id == newsletter_id)).one()
+        return _row_to_newsletter(row)
+
+    def get_newsletter_config(self, newsletter_id: int) -> NewsletterConfig:
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                select(_newsletter_config).where(_newsletter_config.c.newsletter_id == newsletter_id)
+            ).fetchall()
+        return _assemble_newsletter_config(newsletter_id, rows)
+
+    def save_newsletter_config(self, config: NewsletterConfig) -> None:
+        kv = {
+            "subject_prefix": config.subject_prefix,
+            "email_opener": config.email_opener,
+            "email_footer": config.email_footer,
+        }
+        with self._engine.begin() as conn:
+            for key, value in kv.items():
+                conn.execute(
+                    _newsletter_config.delete().where(
+                        (_newsletter_config.c.newsletter_id == config.newsletter_id)
+                        & (_newsletter_config.c.key == key)
+                    )
+                )
+                conn.execute(
+                    _newsletter_config.insert().values(
+                        newsletter_id=config.newsletter_id,
+                        key=key,
+                        value=value,
+                    )
+                )
 
     def get_newsletter(self, slug: str) -> Newsletter | None:
         with self._engine.connect() as conn:

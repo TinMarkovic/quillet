@@ -1,10 +1,18 @@
 from typing import Protocol
 
-from ..models import Newsletter, Post, Subscriber
+from ..models import Newsletter, NewsletterConfig, Post, Subscriber
 
 
 class NewsletterRepository(Protocol):
     def get_newsletter(self, slug: str) -> Newsletter | None: ...
+
+    def update_newsletter(
+        self, newsletter_id: int, name: str, from_name: str, from_email: str, reply_to: str | None
+    ) -> Newsletter: ...
+
+    def get_newsletter_config(self, newsletter_id: int) -> NewsletterConfig: ...
+
+    def save_newsletter_config(self, config: NewsletterConfig) -> None: ...
 
     def list_posts(self, newsletter_slug: str, published_only: bool = True) -> list[Post]: ...
 

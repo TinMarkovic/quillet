@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from ..models import Newsletter, Post, Subscriber
+from ..models import Newsletter, NewsletterConfig, Post, Subscriber
 
 
 class EmailSender(Protocol):
@@ -9,6 +9,7 @@ class EmailSender(Protocol):
         newsletter: Newsletter,
         subscriber: Subscriber,
         confirm_url: str,
+        config: NewsletterConfig | None = None,
     ) -> None: ...
 
     def send_post(
@@ -17,4 +18,5 @@ class EmailSender(Protocol):
         post: Post,
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,
+        config: NewsletterConfig | None = None,
     ) -> None: ...

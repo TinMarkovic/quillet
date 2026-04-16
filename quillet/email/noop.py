@@ -1,6 +1,6 @@
 import logging
 
-from ..models import Newsletter, Post, Subscriber
+from ..models import Newsletter, NewsletterConfig, Post, Subscriber
 
 logger = logging.getLogger("quillet.email.noop")
 
@@ -16,6 +16,7 @@ class NoopSender:
         newsletter: Newsletter,
         subscriber: Subscriber,
         confirm_url: str,
+        config: NewsletterConfig | None = None,
     ) -> None:
         logger.info(
             "NOOP confirmation | newsletter=%s to=%s confirm_url=%s",
@@ -30,6 +31,7 @@ class NoopSender:
         post: Post,
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,
+        config: NewsletterConfig | None = None,
     ) -> None:
         logger.info(
             "NOOP send_post | newsletter=%s post=%s recipients=%d",

@@ -136,7 +136,8 @@ def register_public_routes(bp: Blueprint) -> None:
         token = secrets.token_urlsafe(32)
         subscriber = _db().add_subscriber(newsletter_slug, email, token)
         confirm_url = _confirm_url(name, newsletter_slug, subscriber.token)
-        _email().send_confirmation(newsletter, subscriber, confirm_url)
+        config = _db().get_newsletter_config(newsletter.id)
+        _email().send_confirmation(newsletter, subscriber, confirm_url, config)
 
         if _wants_json():
             return jsonify(ok=True, message="Confirmation email sent."), 201
@@ -268,6 +269,7 @@ def register_public_routes(bp: Blueprint) -> None:
             post,
             subscribers,
             _unsubscribe_url_template(name, newsletter_slug),
+            _db().get_newsletter_config(newsletter.id),
         )
         _db().mark_sent(post.id)
 

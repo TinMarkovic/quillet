@@ -2,6 +2,20 @@ from datetime import datetime
 from typing import NamedTuple
 
 
+class NewsletterConfig(NamedTuple):
+    newsletter_id: int
+    subject_prefix: str | None
+    email_opener: str | None
+    email_footer: str | None
+
+
+CONFIG_DEFAULTS: dict[str, str | None] = {
+    "subject_prefix": None,
+    "email_opener": None,
+    "email_footer": None,
+}
+
+
 class Newsletter(NamedTuple):
     id: int
     slug: str

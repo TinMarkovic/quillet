@@ -1,0 +1,99 @@
+{% extends "quillet/base.html" %}
+
+{% block title %}Settings — {{ newsletter.name }}{% endblock %}
+
+{% block head %}
+<style>
+  fieldset { border: 1px solid #ddd; border-radius: 6px; padding: 1.25rem 1.5rem; margin-bottom: 2rem; }
+  legend { font-weight: 700; font-size: 0.95em; padding: 0 0.4rem; color: #333; }
+  .form-group { margin-bottom: 1.25rem; }
+  .form-group:last-child { margin-bottom: 0; }
+  label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
+  input[type=text], input[type=email], textarea {
+    width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;
+    font-family: inherit; font-size: 1em; box-sizing: border-box;
+  }
+  textarea { font-family: monospace; font-size: 0.9em; min-height: 140px; resize: vertical; }
+  .hint { font-size: 0.85em; color: #666; margin-top: 0.3rem; }
+  .hint code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.95em; }
+  .saved { color: #1a7f37; background: #dafbe1; padding: 0.6rem 1rem; border-radius: 4px; margin-bottom: 1.25rem; }
+  .error { color: #cc0000; padding: 0.75rem; background: #fff0f0; border-radius: 4px; margin-bottom: 1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<p class="muted">
+  <a href="{{ url_for('quillet.dashboard', newsletter_slug=newsletter.slug) }}">← Dashboard</a>
+</p>
+
+<h1>Settings</h1>
+
+{% if saved %}
+  <p class="saved">Settings saved.</p>
+{% endif %}
+{% if error is defined and error %}
+  <p class="error">{{ error }}</p>
+{% endif %}
+
+<form method="post">
+
+  <fieldset>
+    <legend>Newsletter identity</legend>
+
+    <div class="form-group">
+      <label for="name">Newsletter name</label>
+      <input type="text" id="name" name="name" value="{{ newsletter.name }}" required>
+    </div>
+
+    <div class="form-group">
+      <label for="from_name">From name</label>
+      <input type="text" id="from_name" name="from_name" value="{{ newsletter.from_name }}">
+      <p class="hint">Display name shown in the email From header.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="from_email">From email</label>
+      <input type="email" id="from_email" name="from_email" value="{{ newsletter.from_email }}" required>
+    </div>
+
+    <div class="form-group">
+      <label for="reply_to">Reply-To email</label>
+      <input type="email" id="reply_to" name="reply_to" value="{{ newsletter.reply_to or '' }}">
+      <p class="hint">Leave blank to use the From email as the reply address.</p>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Email templates</legend>
+
+    <div class="form-group">
+      <label for="subject_prefix">Subject prefix</label>
+      <input type="text" id="subject_prefix" name="subject_prefix" value="{{ config.subject_prefix or '' }}"
+             placeholder="e.g. [Weekly] ">
+      <p class="hint">Prepended to every email subject line. Leave blank for no prefix.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="email_opener">Confirmation email opener</label>
+      <textarea id="email_opener" name="email_opener">{{ config.email_opener or '' }}</textarea>
+      <p class="hint">
+        Shown as the body of subscription confirmation emails. Supports Markdown.<br>
+        Available variables: <code>{newsletter_name}</code>, <code>{confirm_url}</code>.<br>
+        Leave blank to use the default copy.
+      </p>
+    </div>
+
+    <div class="form-group">
+      <label for="email_footer">Post email footer</label>
+      <textarea id="email_footer" name="email_footer">{{ config.email_footer or '' }}</textarea>
+      <p class="hint">
+        Appended after every broadcast post. Supports Markdown.<br>
+        Available variable: <code>{unsubscribe_url}</code>.<br>
+        Leave blank to use the default unsubscribe footer.
+      </p>
+    </div>
+  </fieldset>
+
+  <button type="submit" class="btn">Save settings</button>
+</form>
+{% endblock %}

@@ -20,7 +20,8 @@
 
 <p class="muted">
   {{ confirmed_count }} confirmed subscriber{{ 's' if confirmed_count != 1 }} ·
-  <a href="{{ url_for('quillet.subscriber_list', newsletter_slug=newsletter.slug) }}">manage subscribers</a>
+  <a href="{{ url_for('quillet.subscriber_list', newsletter_slug=newsletter.slug) }}">manage subscribers</a> ·
+  <a href="{{ url_for('quillet.settings', newsletter_slug=newsletter.slug) }}">settings</a>
 </p>
 
 {% if posts %}
