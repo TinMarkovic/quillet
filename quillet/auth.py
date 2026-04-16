@@ -19,19 +19,22 @@ def require_basic_auth(view: Callable) -> Callable:
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         auth_header = request.headers.get("Authorization", "")
 
+        authenticated = False
         if auth_header.startswith("Basic "):
             try:
                 decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
                 username, _, password = decoded.partition(":")
-                if _check_credentials(username, password):
-                    return view(*args, **kwargs)
+                authenticated = _check_credentials(username, password)
             except Exception:
                 pass
 
-        return Response(
-            "Authentication required.",
-            status=401,
-            headers={"WWW-Authenticate": 'Basic realm="Quillet Admin"'},
-        )
+        if not authenticated:
+            return Response(
+                "Authentication required.",
+                status=401,
+                headers={"WWW-Authenticate": 'Basic realm="Quillet Admin"'},
+            )
+
+        return view(*args, **kwargs)
 
     return wrapper
