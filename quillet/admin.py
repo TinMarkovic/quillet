@@ -10,7 +10,7 @@ from flask import (
 )
 
 from .auth import require_basic_auth
-from .models import Newsletter, NewsletterConfig, Subscriber
+from .models import NewsletterConfig, Subscriber
 from .routes import _db, _email, _unsubscribe_url_template
 
 

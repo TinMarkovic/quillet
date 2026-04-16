@@ -170,8 +170,7 @@ class SQLAlchemyRepository:
             for key, value in kv.items():
                 conn.execute(
                     _newsletter_config.delete().where(
-                        (_newsletter_config.c.newsletter_id == config.newsletter_id)
-                        & (_newsletter_config.c.key == key)
+                        (_newsletter_config.c.newsletter_id == config.newsletter_id) & (_newsletter_config.c.key == key)
                     )
                 )
                 conn.execute(

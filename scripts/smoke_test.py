@@ -21,10 +21,10 @@ from quillet.db.sqlalchemy import SQLAlchemyRepository
 class _NoopSender:
     """Email sender that silently discards all messages."""
 
-    def send_confirmation(self, newsletter, subscriber, confirm_url):
+    def send_confirmation(self, newsletter, subscriber, confirm_url, config=None):
         print(f"  [email] confirmation → {subscriber.email}  url={confirm_url}")
 
-    def send_post(self, newsletter, post, subscribers, unsubscribe_url_template):
+    def send_post(self, newsletter, post, subscribers, unsubscribe_url_template, config=None):
         print(f"  [email] post '{post.title}' → {len(subscribers)} subscriber(s)")
 
 
@@ -132,6 +132,18 @@ def run() -> int:
         )
         failures += not _check(
             "subscriber list", client.get("/newsletter/blog/admin/subscribers", headers=auth).status_code, 200
+        )
+        failures += not _check(
+            "settings page", client.get("/newsletter/blog/admin/settings", headers=auth).status_code, 200
+        )
+        failures += not _check(
+            "send-test",
+            client.post(
+                "/newsletter/blog/admin/posts/hello-world/send-test",
+                data={"test_email": "owner@example.com"},
+                headers=auth,
+            ).status_code,
+            302,
         )
 
         print("\n-- JSON accept header --")

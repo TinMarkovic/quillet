@@ -4,7 +4,7 @@ import requests
 
 from ..models import Newsletter, NewsletterConfig, Post, Subscriber
 from ._utils import md_to_html, md_to_plain
-from .smtp import _DEFAULT_OPENER_HTML, _DEFAULT_OPENER_TEXT, _render_opener
+from .smtp import _render_opener
 
 _MAILGUN_API_BASES = {
     "us": "https://api.mailgun.net/v3",
