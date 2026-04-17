@@ -60,7 +60,7 @@ class MailgunSender:
 
     def _subject(self, title: str, config: NewsletterConfig | None) -> str:
         prefix = (config and config.subject_prefix) or self._subject_prefix
-        return f"{prefix}{title}" if prefix else title
+        return f"{prefix} {title}" if prefix else title
 
     def send_confirmation(
         self,

@@ -37,7 +37,9 @@
     <tr>
       <td>{{ sub.email }}</td>
       <td>
-        {% if sub.confirmed_at %}
+        {% if sub.unsubscribed %}
+          <span class="badge badge-draft">Unsubscribed</span>
+        {% elif sub.confirmed_at %}
           <span class="badge badge-published">Confirmed</span>
         {% else %}
           <span class="badge badge-draft">Pending</span>

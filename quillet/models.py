@@ -41,3 +41,4 @@ class Subscriber(NamedTuple):
     email: str
     token: str
     confirmed_at: datetime | None
+    unsubscribed: bool = False

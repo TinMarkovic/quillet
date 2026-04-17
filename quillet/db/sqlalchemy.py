@@ -93,6 +93,7 @@ def _row_to_subscriber(row) -> Subscriber:
         newsletter_id=row.newsletter_id,
         email=row.email,
         token=row.token,
+        unsubscribed=bool(row.unsubscribed),
         confirmed_at=row.confirmed_at,
     )
 
@@ -303,12 +304,7 @@ class SQLAlchemyRepository:
             newsletter = conn.execute(select(_newsletters).where(_newsletters.c.slug == newsletter_slug)).one_or_none()
             if newsletter is None:
                 return []
-            rows = conn.execute(
-                select(_subscribers).where(
-                    (_subscribers.c.newsletter_id == newsletter.id)
-                    & (_subscribers.c.unsubscribed == False)  # noqa: E712
-                )
-            ).fetchall()
+            rows = conn.execute(select(_subscribers).where(_subscribers.c.newsletter_id == newsletter.id)).fetchall()
         return [_row_to_subscriber(r) for r in rows]
 
     def unsubscribe(self, token: str) -> None:

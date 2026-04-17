@@ -116,6 +116,7 @@ class SupabaseRestRepository:
             email=row["email"],
             token=row["token"],
             confirmed_at=_parse_dt(row.get("confirmed_at")),
+            unsubscribed=bool(row.get("unsubscribed", False)),
         )
 
     def _get_newsletter_id(self, slug: str) -> int | None:
@@ -233,7 +234,7 @@ class SupabaseRestRepository:
             return []
         rows = self._get(
             "subscribers",
-            {"newsletter_id": f"eq.{newsletter_id}", "unsubscribed": "eq.false"},
+            {"newsletter_id": f"eq.{newsletter_id}"},
         )
         return [self._row_to_subscriber(r) for r in rows]
 
