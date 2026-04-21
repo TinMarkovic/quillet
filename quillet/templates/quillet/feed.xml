@@ -11,8 +11,8 @@
       <link>{{ post_url }}</link>
       <guid isPermaLink="true">{{ post_url }}</guid>
       {% if post.published_at %}<pubDate>{{ post.published_at | rfc2822 }}</pubDate>{% endif %}
-      <description><![CDATA[{{ post_html }}]]></description>
-      <content:encoded><![CDATA[{{ post_html }}]]></content:encoded>
+      <description><![CDATA[{{ post_html | safe }}]]></description>
+      <content:encoded><![CDATA[{{ post_html | safe }}]]></content:encoded>
     </item>
     {% endfor %}
   </channel>
