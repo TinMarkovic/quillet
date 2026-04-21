@@ -135,16 +135,28 @@ def register_public_routes(bp: Blueprint) -> None:
             )
 
         token = secrets.token_urlsafe(32)
-        subscriber = _db().add_subscriber(newsletter_slug, email, token)
-        confirm_url = _confirm_url(name, newsletter_slug, subscriber.token)
+        existing = _db().get_subscriber_by_email(newsletter.id, email)
         config = _db().get_newsletter_config(newsletter.id)
-        _email().send_confirmation(newsletter, subscriber, confirm_url, config)
 
-        _db().log_event(
-            "subscribe",
-            json.dumps({"email": email, "newsletter_slug": newsletter_slug}),
-            newsletter_id=newsletter.id,
-        )
+        if existing is not None:
+            if existing.confirmed_at is None:
+                confirm_url = _confirm_url(name, newsletter_slug, existing.token)
+                _email().send_confirmation(newsletter, existing, confirm_url, config)
+                _db().log_event(
+                    "subscribe_resend",
+                    json.dumps({"email": email, "newsletter_slug": newsletter_slug}),
+                    newsletter_id=newsletter.id,
+                )
+            # Already confirmed: silently succeed — don't reveal subscription status
+        else:
+            subscriber = _db().add_subscriber(newsletter_slug, email, token)
+            confirm_url = _confirm_url(name, newsletter_slug, subscriber.token)
+            _email().send_confirmation(newsletter, subscriber, confirm_url, config)
+            _db().log_event(
+                "subscribe",
+                json.dumps({"email": email, "newsletter_slug": newsletter_slug}),
+                newsletter_id=newsletter.id,
+            )
 
         if _wants_json():
             return jsonify(ok=True, message="Confirmation email sent."), 201
