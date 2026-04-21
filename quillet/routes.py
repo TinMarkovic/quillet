@@ -1,3 +1,4 @@
+import json
 import secrets
 from urllib.parse import urljoin
 
@@ -139,6 +140,12 @@ def register_public_routes(bp: Blueprint) -> None:
         config = _db().get_newsletter_config(newsletter.id)
         _email().send_confirmation(newsletter, subscriber, confirm_url, config)
 
+        _db().log_event(
+            "subscribe",
+            json.dumps({"email": email, "newsletter_slug": newsletter_slug}),
+            newsletter_id=newsletter.id,
+        )
+
         if _wants_json():
             return jsonify(ok=True, message="Confirmation email sent."), 201
 
@@ -155,6 +162,13 @@ def register_public_routes(bp: Blueprint) -> None:
             abort(404)
 
         subscriber = _db().confirm_subscriber(token)
+
+        if subscriber:
+            _db().log_event(
+                "confirm",
+                json.dumps({"email": subscriber.email, "newsletter_slug": newsletter_slug}),
+                newsletter_id=newsletter.id,
+            )
 
         if _wants_json():
             if subscriber is None:
@@ -174,6 +188,12 @@ def register_public_routes(bp: Blueprint) -> None:
             abort(404)
 
         _db().unsubscribe(token)
+
+        _db().log_event(
+            "unsubscribe",
+            json.dumps({"newsletter_slug": newsletter_slug}),
+            newsletter_id=newsletter.id,
+        )
 
         if _wants_json():
             return jsonify(ok=True)

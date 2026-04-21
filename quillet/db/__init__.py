@@ -40,6 +40,15 @@ class NewsletterRepository(Protocol):
 
     def delete_subscriber(self, subscriber_id: int) -> None: ...
 
+    def log_event(
+        self,
+        event_type: str,
+        details: str = "{}",
+        newsletter_id: int | None = None,
+    ) -> None: ...
+
+    def get_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None: ...
+
     def create_newsletter(
         self, slug: str, name: str, from_email: str, from_name: str, reply_to: str | None
     ) -> Newsletter: ...

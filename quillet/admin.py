@@ -1,3 +1,4 @@
+import json
 import re
 
 from flask import (
@@ -139,6 +140,11 @@ def register_admin_routes(bp: Blueprint) -> None:
             abort(404)
 
         _db().publish_post(post.id)
+        _db().log_event(
+            "post_published",
+            json.dumps({"post_slug": post_slug, "newsletter_slug": newsletter_slug}),
+            newsletter_id=newsletter.id,
+        )
         return redirect(url_for(f"{name}.dashboard", newsletter_slug=newsletter_slug))
 
     @bp.post("/<newsletter_slug>/admin/posts/<post_slug>/send")
@@ -160,6 +166,17 @@ def register_admin_routes(bp: Blueprint) -> None:
             config = _db().get_newsletter_config(newsletter.id)
             _email().send_post(newsletter, post, subscribers, _unsubscribe_url_template(name, newsletter_slug), config)
             _db().mark_sent(post.id)
+            _db().log_event(
+                "post_sent",
+                json.dumps(
+                    {
+                        "post_slug": post_slug,
+                        "newsletter_slug": newsletter_slug,
+                        "recipients": len(subscribers),
+                    }
+                ),
+                newsletter_id=newsletter.id,
+            )
 
         return redirect(url_for(f"{name}.dashboard", newsletter_slug=newsletter_slug))
 
@@ -175,6 +192,11 @@ def register_admin_routes(bp: Blueprint) -> None:
             abort(404)
 
         _db().delete_post(post.id)
+        _db().log_event(
+            "post_deleted",
+            json.dumps({"post_slug": post_slug, "newsletter_slug": newsletter_slug}),
+            newsletter_id=newsletter.id,
+        )
         return redirect(url_for(f"{name}.dashboard", newsletter_slug=newsletter_slug))
 
     @bp.get("/<newsletter_slug>/admin/subscribers")
@@ -199,6 +221,11 @@ def register_admin_routes(bp: Blueprint) -> None:
             abort(404)
 
         _db().delete_subscriber(subscriber_id)
+        _db().log_event(
+            "subscriber_deleted",
+            json.dumps({"subscriber_id": subscriber_id, "newsletter_slug": newsletter_slug}),
+            newsletter_id=newsletter.id,
+        )
         return redirect(url_for(f"{name}.subscriber_list", newsletter_slug=newsletter_slug))
 
     @bp.get("/<newsletter_slug>/admin/settings")

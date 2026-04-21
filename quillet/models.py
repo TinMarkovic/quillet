@@ -2,6 +2,14 @@ from datetime import datetime
 from typing import NamedTuple
 
 
+class AuditEvent(NamedTuple):
+    id: int
+    newsletter_id: int | None
+    event_type: str
+    details: str  # JSON
+    created_at: datetime
+
+
 class NewsletterConfig(NamedTuple):
     newsletter_id: int
     subject_prefix: str | None

@@ -243,3 +243,36 @@ class SupabaseRestRepository:
 
     def delete_subscriber(self, subscriber_id: int) -> None:
         self._delete("subscribers", {"id": subscriber_id})
+
+    # --- Audit log ---
+
+    def log_event(
+        self,
+        event_type: str,
+        details: str = "{}",
+        newsletter_id: int | None = None,
+    ) -> None:
+        self._post(
+            "audit_log",
+            {
+                "newsletter_id": newsletter_id,
+                "event_type": event_type,
+                "details": details,
+                "created_at": _fmt_dt(datetime.now(timezone.utc)),
+            },
+        )
+
+    # --- Subscriber lookup ---
+
+    def get_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
+        rows = self._get(
+            "subscribers",
+            {
+                "newsletter_id": f"eq.{newsletter_id}",
+                "email": f"eq.{email}",
+                "unsubscribed": "eq.false",
+            },
+        )
+        if not rows:
+            return None
+        return self._row_to_subscriber(rows[0])

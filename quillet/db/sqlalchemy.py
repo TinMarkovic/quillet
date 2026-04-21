@@ -17,7 +17,7 @@ from sqlalchemy import (
     update,
 )
 
-from ..models import CONFIG_DEFAULTS, Newsletter, NewsletterConfig, Post, Subscriber
+from ..models import CONFIG_DEFAULTS, AuditEvent, Newsletter, NewsletterConfig, Post, Subscriber
 
 metadata = MetaData()
 
@@ -64,6 +64,16 @@ _newsletter_config = Table(
     UniqueConstraint("newsletter_id", "key"),
 )
 
+_audit_log = Table(
+    "audit_log",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("newsletter_id", Integer, ForeignKey("newsletters.id"), nullable=True),
+    Column("event_type", String(64), nullable=False),
+    Column("details", Text, nullable=False, default="{}"),
+    Column("created_at", DateTime, nullable=False),
+)
+
 
 def _row_to_newsletter(row) -> Newsletter:
     return Newsletter(
@@ -96,6 +106,16 @@ def _row_to_subscriber(row) -> Subscriber:
         token=row.token,
         unsubscribed=bool(row.unsubscribed),
         confirmed_at=row.confirmed_at,
+    )
+
+
+def _row_to_audit_event(row) -> AuditEvent:
+    return AuditEvent(
+        id=row.id,
+        newsletter_id=row.newsletter_id,
+        event_type=row.event_type,
+        details=row.details,
+        created_at=row.created_at,
     )
 
 
@@ -327,3 +347,36 @@ class SQLAlchemyRepository:
     def delete_subscriber(self, subscriber_id: int) -> None:
         with self._engine.begin() as conn:
             conn.execute(_subscribers.delete().where(_subscribers.c.id == subscriber_id))
+
+    # --- Audit log ---
+
+    def log_event(
+        self,
+        event_type: str,
+        details: str = "{}",
+        newsletter_id: int | None = None,
+    ) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(
+                _audit_log.insert().values(
+                    newsletter_id=newsletter_id,
+                    event_type=event_type,
+                    details=details,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+
+    # --- Subscriber lookup ---
+
+    def get_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(_subscribers).where(
+                    (_subscribers.c.newsletter_id == newsletter_id)
+                    & (_subscribers.c.email == email)
+                    & (_subscribers.c.unsubscribed == False)  # noqa: E712
+                )
+            ).one_or_none()
+        if row is None:
+            return None
+        return _row_to_subscriber(row)
