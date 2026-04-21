@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
     select,
     update,
 )
@@ -111,7 +112,19 @@ def _assemble_newsletter_config(newsletter_id: int, rows) -> NewsletterConfig:
 
 class SQLAlchemyRepository:
     def __init__(self, db_url: str) -> None:
-        self._engine = create_engine(db_url)
+        is_sqlite = db_url.startswith("sqlite")
+        self._engine = create_engine(
+            db_url,
+            connect_args={"timeout": 10} if is_sqlite else {},
+            execution_options={"isolation_level": None} if is_sqlite else {},
+        )
+
+        if is_sqlite:
+
+            @event.listens_for(self._engine, "connect")
+            def set_wal_mode(dbapi_conn, connection_record):
+                dbapi_conn.execute("PRAGMA journal_mode=WAL")
+
         metadata.create_all(self._engine)
 
     # --- Newsletters ---
