@@ -24,7 +24,16 @@ class _NoopSender:
     def send_confirmation(self, newsletter, subscriber, confirm_url, config=None):
         print(f"  [email] confirmation → {subscriber.email}  url={confirm_url}")
 
-    def send_post(self, newsletter, post, subscribers, unsubscribe_url_template, config=None):
+    def send_post(
+        self,
+        newsletter,
+        post,
+        subscribers,
+        unsubscribe_url_template,
+        config=None,
+        post_url="",
+        post_list_url="",
+    ):
         print(f"  [email] post '{post.title}' → {len(subscribers)} subscriber(s)")
 
 

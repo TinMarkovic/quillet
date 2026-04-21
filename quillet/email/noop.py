@@ -32,6 +32,8 @@ class NoopSender:
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,
         config: NewsletterConfig | None = None,
+        post_url: str = "",
+        post_list_url: str = "",
     ) -> None:
         logger.info(
             "NOOP send_post | newsletter=%s post=%s recipients=%d",

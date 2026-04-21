@@ -137,7 +137,6 @@ class SQLAlchemyRepository:
         self._engine = create_engine(
             db_url,
             connect_args={"timeout": 10} if is_sqlite else {},
-            execution_options={"isolation_level": None} if is_sqlite else {},
         )
 
         if is_sqlite:

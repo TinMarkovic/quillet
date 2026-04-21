@@ -39,3 +39,19 @@ We import smallest possible units: `from foo import bar` is good. `import foo; f
 We avoid defining classes ONLY TO encapsulate methods, we rely on Python's modules.
 We avoid commenting self-explanatory code, our comments are focused to docstrings (in functions) and to large scope explanations.
 We avoid deep nesting (e.g., >2 levels). Break into smaller functions when needed.
+
+## Shipping
+
+When the user says "ship it", "release it", "deploy", or any clear synonym, execute the full
+release process in order — do not ask for confirmation, just do it:
+
+1. **Code quality** — run `ruff check quillet/` and `black --check quillet/`; fix any errors
+2. **Smoke test** — run `.venv/bin/python scripts/smoke_test.py`; all checks must pass
+3. **Version bump** — determine the correct semver bump from the work done:
+   - patch: bug fixes only
+   - minor: new features, no breaking changes
+   - major: breaking changes
+   Bump `version` in `pyproject.toml`
+4. **Commit** — `git add -A && git commit` with a clear message
+5. **Tag** — `git tag v<new_version>`
+6. **Push** — `git push && git push --tags` (rebase first if the remote has diverged)

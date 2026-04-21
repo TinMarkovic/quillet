@@ -10,3 +10,11 @@ Common mistakes to watch for in this codebase:
 - Stale imports after feature removal (e.g. removing a route but leaving its `import`)
 - Passing a `Path` object to a function that calls string methods (`.split`, `[0]`, etc.) — always check the type the callee expects
 - Bare relative imports like `from foo import ...` instead of `from .foo import ...` inside the `tinthe` package
+- When adding kwargs to a `Protocol` method, update **all** concrete implementations — including
+  noop/stub senders (`email/noop.py`) and any local stubs in `scripts/` (e.g. `smoke_test.py`);
+  Python Protocols are structural and won't raise at import time, so the mismatch only surfaces at runtime
+- `execution_options={"isolation_level": None}` is invalid in SQLAlchemy — `None` is not a recognised
+  level string and causes `AttributeError: 'NoneType' has no attribute 'replace'` on first connect;
+  use `"AUTOCOMMIT"` or omit the option entirely
+- After any change that touches the `EmailSender` or `NewsletterRepository` protocol signatures,
+  run `scripts/smoke_test.py` before committing to catch implementor drift early
