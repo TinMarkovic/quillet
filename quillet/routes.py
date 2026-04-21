@@ -56,6 +56,18 @@ def _unsubscribe_url_template(bp_name: str, newsletter_slug: str) -> str:
     return urljoin(base, path).replace("TOKEN_PLACEHOLDER", "{token}")
 
 
+def _post_url(bp_name: str, newsletter_slug: str, post_slug: str) -> str:
+    base = _base_url()
+    path = url_for(f"{bp_name}.post_detail", newsletter_slug=newsletter_slug, post_slug=post_slug)
+    return urljoin(base, path)
+
+
+def _post_list_url(bp_name: str, newsletter_slug: str) -> str:
+    base = _base_url()
+    path = url_for(f"{bp_name}.post_list", newsletter_slug=newsletter_slug)
+    return urljoin(base, path)
+
+
 def _confirm_url(bp_name: str, newsletter_slug: str, token: str) -> str:
     base = _base_url()
     path = url_for(f"{bp_name}.confirm_subscription", newsletter_slug=newsletter_slug, token=token)
@@ -302,6 +314,8 @@ def register_public_routes(bp: Blueprint) -> None:
             subscribers,
             _unsubscribe_url_template(name, newsletter_slug),
             _db().get_newsletter_config(newsletter.id),
+            post_url=_post_url(name, newsletter_slug, post_slug),
+            post_list_url=_post_list_url(name, newsletter_slug),
         )
         _db().mark_sent(post.id)
 

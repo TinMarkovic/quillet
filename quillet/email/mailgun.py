@@ -3,7 +3,7 @@ import json
 import requests
 
 from ..models import Newsletter, NewsletterConfig, Post, Subscriber
-from ._utils import md_to_html, md_to_plain
+from ._utils import build_post_body_md, md_to_html, md_to_plain
 from .smtp import _render_opener
 
 _MAILGUN_API_BASES = {
@@ -90,6 +90,8 @@ class MailgunSender:
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,
         config: NewsletterConfig | None = None,
+        post_url: str = "",
+        post_list_url: str = "",
     ) -> None:
         """
         Send a post to all subscribers using Mailgun batch sending.
@@ -100,6 +102,7 @@ class MailgunSender:
 
         reply_to = newsletter.reply_to or newsletter.from_email
         footer_text, footer_html = _render_footer_batch(config)
+        full_md = build_post_body_md(post, newsletter.name, config, post_url, post_list_url)
 
         recipient_variables = {
             sub.email: {
@@ -115,8 +118,8 @@ class MailgunSender:
                 "h:Reply-To": reply_to,
                 "to": [sub.email for sub in subscribers],
                 "subject": self._subject(post.title, config),
-                "text": f"{md_to_plain(post.body_md)}\n\n{footer_text}",
-                "html": f"{md_to_html(post.body_md)}{footer_html}",
+                "text": f"{md_to_plain(full_md)}\n\n{footer_text}",
+                "html": f"{md_to_html(full_md)}{footer_html}",
                 "recipient-variables": json.dumps(recipient_variables),
             },
         )

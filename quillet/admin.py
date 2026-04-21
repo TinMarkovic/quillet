@@ -12,7 +12,7 @@ from flask import (
 
 from .auth import require_basic_auth
 from .models import NewsletterConfig, Subscriber
-from .routes import _db, _email, _unsubscribe_url_template
+from .routes import _db, _email, _post_list_url, _post_url, _unsubscribe_url_template
 
 
 def _slugify(text: str) -> str:
@@ -164,7 +164,15 @@ def register_admin_routes(bp: Blueprint) -> None:
         if post.sent_at is None:
             subscribers = _db().list_confirmed_subscribers(newsletter_slug)
             config = _db().get_newsletter_config(newsletter.id)
-            _email().send_post(newsletter, post, subscribers, _unsubscribe_url_template(name, newsletter_slug), config)
+            _email().send_post(
+                newsletter,
+                post,
+                subscribers,
+                _unsubscribe_url_template(name, newsletter_slug),
+                config,
+                post_url=_post_url(name, newsletter_slug, post_slug),
+                post_list_url=_post_list_url(name, newsletter_slug),
+            )
             _db().mark_sent(post.id)
             _db().log_event(
                 "post_sent",
@@ -275,6 +283,7 @@ def register_admin_routes(bp: Blueprint) -> None:
             subject_prefix=request.form.get("subject_prefix", "").strip() or None,
             email_opener=request.form.get("email_opener", "").strip() or None,
             email_footer=request.form.get("email_footer", "").strip() or None,
+            post_header_template=request.form.get("post_header_template", "").strip() or None,
         )
         _db().save_newsletter_config(config)
 
@@ -313,6 +322,8 @@ def register_admin_routes(bp: Blueprint) -> None:
             [test_subscriber],
             _unsubscribe_url_template(name, newsletter_slug),
             test_config,
+            post_url=_post_url(name, newsletter_slug, post_slug),
+            post_list_url=_post_list_url(name, newsletter_slug),
         )
 
         return redirect(

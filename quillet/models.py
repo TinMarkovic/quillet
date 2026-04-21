@@ -15,12 +15,14 @@ class NewsletterConfig(NamedTuple):
     subject_prefix: str | None
     email_opener: str | None
     email_footer: str | None
+    post_header_template: str | None = None
 
 
 CONFIG_DEFAULTS: dict[str, str | None] = {
     "subject_prefix": None,
     "email_opener": None,
     "email_footer": None,
+    "post_header_template": None,
 }
 
 

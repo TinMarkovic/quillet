@@ -92,6 +92,17 @@
         Leave blank to use the default unsubscribe footer.
       </p>
     </div>
+
+    <div class="form-group">
+      <label for="post_header_template">Post email header</label>
+      <textarea id="post_header_template" name="post_header_template" style="min-height:80px">{{ config.post_header_template or '' }}</textarea>
+      <p class="hint">
+        Prepended at the top of every broadcast post (before the body). Supports Markdown.<br>
+        Available variables: <code>{post_title}</code>, <code>{newsletter_name}</code>,
+        <code>{post_url}</code>, <code>{post_list_url}</code>, <code>{reading_time}</code>.<br>
+        Leave blank to use the default: <code># {post_title}</code>
+      </p>
+    </div>
   </fieldset>
 
   <button type="submit" class="btn">Save settings</button>

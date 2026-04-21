@@ -19,4 +19,6 @@ class EmailSender(Protocol):
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,
         config: NewsletterConfig | None = None,
+        post_url: str = "",
+        post_list_url: str = "",
     ) -> None: ...

@@ -3,7 +3,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from ..models import Newsletter, NewsletterConfig, Post, Subscriber
-from ._utils import md_to_html, md_to_plain
+from ._utils import build_post_body_md, md_to_html, md_to_plain
 
 _DEFAULT_OPENER_TEXT = (
     "Hi,\n\n"
@@ -123,6 +123,8 @@ class SmtpSender:
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,
         config: NewsletterConfig | None = None,
+        post_url: str = "",
+        post_list_url: str = "",
     ) -> None:
         """
         Sends one email per subscriber (no batch merge — SMTP has no built-in
@@ -132,8 +134,9 @@ class SmtpSender:
             return
 
         reply_to = newsletter.reply_to or newsletter.from_email
-        body_text = md_to_plain(post.body_md)
-        body_html = md_to_html(post.body_md)
+        full_md = build_post_body_md(post, newsletter.name, config, post_url, post_list_url)
+        body_text = md_to_plain(full_md)
+        body_html = md_to_html(full_md)
 
         with self._connect() as smtp:
             for subscriber in subscribers:

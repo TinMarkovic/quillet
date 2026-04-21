@@ -127,6 +127,7 @@ def _assemble_newsletter_config(newsletter_id: int, rows) -> NewsletterConfig:
         subject_prefix=merged["subject_prefix"],
         email_opener=merged["email_opener"],
         email_footer=merged["email_footer"],
+        post_header_template=merged["post_header_template"],
     )
 
 
@@ -199,6 +200,7 @@ class SQLAlchemyRepository:
             "subject_prefix": config.subject_prefix,
             "email_opener": config.email_opener,
             "email_footer": config.email_footer,
+            "post_header_template": config.post_header_template,
         }
         with self._engine.begin() as conn:
             for key, value in kv.items():
