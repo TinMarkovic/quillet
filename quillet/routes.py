@@ -1,5 +1,6 @@
 import json
 import secrets
+from functools import lru_cache
 from urllib.parse import urljoin
 
 import markdown2
@@ -8,6 +9,7 @@ from flask import (
     abort,
     current_app,
     jsonify,
+    make_response,
     render_template,
     request,
     url_for,
@@ -16,7 +18,6 @@ from flask import (
 from .auth import require_basic_auth
 from .db import NewsletterRepository
 from .email import EmailSender
-from .models import Post
 
 # ---------------------------------------------------------------------------
 # Helpers (used by admin.py too)
@@ -43,9 +44,10 @@ def _wants_json() -> bool:
     return _is_api_mode() or request.accept_mimetypes.best == "application/json"
 
 
-def _render_post_html(post: Post) -> str:
+@lru_cache(maxsize=256)
+def _render_post_html(body_md: str) -> str:
     return markdown2.markdown(
-        post.body_md,
+        body_md,
         extras=["fenced-code-blocks", "header-ids", "strike", "tables"],
     )
 
@@ -91,16 +93,22 @@ def register_public_routes(bp: Blueprint) -> None:
         posts = _db().list_posts(newsletter_slug, published_only=True)
 
         if _wants_json():
-            return jsonify(
+            response = jsonify(
                 newsletter=newsletter._asdict(),
                 posts=[p._asdict() for p in posts],
             )
+            response.headers["Cache-Control"] = "public, max-age=300"
+            return response
 
-        return render_template(
-            "quillet/post_list.html",
-            newsletter=newsletter,
-            posts=posts,
+        response = make_response(
+            render_template(
+                "quillet/post_list.html",
+                newsletter=newsletter,
+                posts=posts,
+            )
         )
+        response.headers["Cache-Control"] = "public, max-age=300"
+        return response
 
     @bp.get("/<newsletter_slug>/posts/<post_slug>")
     def post_detail(newsletter_slug: str, post_slug: str):
@@ -113,14 +121,20 @@ def register_public_routes(bp: Blueprint) -> None:
             abort(404)
 
         if _wants_json():
-            return jsonify(newsletter=newsletter._asdict(), post=post._asdict())
+            response = jsonify(newsletter=newsletter._asdict(), post=post._asdict())
+            response.headers["Cache-Control"] = "public, max-age=600"
+            return response
 
-        return render_template(
-            "quillet/post_detail.html",
-            newsletter=newsletter,
-            post=post,
-            post_html=_render_post_html(post),
+        response = make_response(
+            render_template(
+                "quillet/post_detail.html",
+                newsletter=newsletter,
+                post=post,
+                post_html=_render_post_html(post.body_md),
+            )
         )
+        response.headers["Cache-Control"] = "public, max-age=600"
+        return response
 
     @bp.post("/<newsletter_slug>/subscribe")
     def subscribe(newsletter_slug: str):
@@ -240,7 +254,7 @@ def register_public_routes(bp: Blueprint) -> None:
         items = [
             (
                 post,
-                _render_post_html(post),
+                _render_post_html(post.body_md),
                 urljoin(base, url_for(f"{name}.post_detail", newsletter_slug=newsletter_slug, post_slug=post.slug)),
             )
             for post in posts
@@ -256,7 +270,9 @@ def register_public_routes(bp: Blueprint) -> None:
             channel_url=channel_url,
             feed_url=feed_url,
         )
-        return current_app.response_class(xml, mimetype="application/rss+xml")
+        response = current_app.response_class(xml, mimetype="application/rss+xml")
+        response.headers["Cache-Control"] = "public, max-age=600"
+        return response
 
     # --- API admin routes (always JSON, always Basic Auth) ---
 
