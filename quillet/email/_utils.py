@@ -45,4 +45,4 @@ def md_to_plain(md: str) -> str:
 
 def md_to_html(md: str) -> str:
     """Render markdown to HTML for email HTML parts (same extras as the web view)."""
-    return markdown2.markdown(md, extras=["header-ids", "strike", "tables"])
+    return markdown2.markdown(md, extras=["fenced-code-blocks", "header-ids", "strike", "tables"])

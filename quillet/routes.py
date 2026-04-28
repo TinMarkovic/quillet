@@ -46,7 +46,7 @@ def _wants_json() -> bool:
 def _render_post_html(post: Post) -> str:
     return markdown2.markdown(
         post.body_md,
-        extras=["header-ids", "strike", "tables"],
+        extras=["fenced-code-blocks", "header-ids", "strike", "tables"],
     )
 
 

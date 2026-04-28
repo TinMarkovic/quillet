@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "quillet"
-version = "0.6.2"
+version = "0.6.3"
 description = "Flask newsletter + microblog package. Importable Blueprint, standalone web app, or headless API."
 readme = "README.md"
 requires-python = ">=3.10"
