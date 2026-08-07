@@ -231,14 +231,36 @@ GET  /<slug>/unsubscribe/<token>
 ### JSON API (Basic Auth: username=admin, password=QUILLET_ADMIN_PASSWORD)
 
 ```
+GET  /<slug>/api/openapi.yaml
+     OpenAPI 3 spec for the curated admin JSON API. Public (no auth).
+     Response: YAML document (application/yaml)
+
+GET  /<slug>/api/posts
+     List posts including drafts. Optional query: status=all|draft|published|unsent|sent.
+     Response: {"posts": [{id, newsletter_id, slug, title, body_md, published_at, sent_at}, ...]}
+
+GET  /<slug>/api/posts/<post_slug>
+     Fetch a single post by slug, including drafts.
+     Response: {"post": {...}} (200)
+
 POST /<slug>/api/posts
      Create a draft post.
      Body: {"title": "...", "slug": "...", "body_md": "..."}
      Response: {"post": {...}} (201)
 
+PUT  /<slug>/api/posts/<post_slug>
+     Update title/body. slug is optional — omit to keep the existing slug.
+     Body: {"title": "...", "body_md": "...", "slug": "...?"}
+     Response: {"post": {...}} (200)
+
 POST /<slug>/api/posts/<post_slug>/publish
      Publish a draft post (sets published_at to now).
      Response: {"post": {...}} (200)
+
+POST /<slug>/api/posts/<post_slug>/send-test
+     Email a single preview address. Does NOT set sent_at.
+     Body: {"email": "owner@example.com"}
+     Response: {"ok": true} (200)
 
 POST /<slug>/api/posts/<post_slug>/send
      Email the post to all confirmed subscribers.
@@ -322,6 +344,10 @@ curl -s -u "$AUTH" -X POST "$BASE/$SLUG/api/posts/hello-world/send"
 | `QUILLET_SMTP_USE_TLS` | No | `true` | Set `false` for Mailhog / local SMTP |
 | `QUILLET_SMTP_USERNAME` | No | — | |
 | `QUILLET_SMTP_PASSWORD` | No | — | |
+| `QUILLET_MCP_BASE_URL` | If MCP | — | Base URL the MCP server calls (e.g. `http://127.0.0.1:8000`) |
+| `QUILLET_MCP_NEWSLETTER_SLUG` | No | `spike` | Newsletter slug for MCP tools |
+| `QUILLET_MCP_USERNAME` | No | `admin` | Basic Auth username used by the MCP server |
+| `QUILLET_MCP_PASSWORD` | If MCP | — | Basic Auth password used by the MCP server |
 
 ---
 
@@ -495,6 +521,12 @@ A post can only be sent once. Use `flask quillet send <slug> <post-slug> --force
 # Unit-level (Flask test client, in-memory SQLite, no network)
 python scripts/smoke_test.py
 
+# MCP tool-list + create_post round-trip (in-process HTTP)
+python scripts/mcp_smoke_test.py
+
+# Spike fixture seed/reset (local OpenAPI vs MCP matrix)
+python scripts/spike_fixture.py --reset
+
 # Integration (Docker, real HTTP, real gunicorn)
 ./scripts/docker_test.sh
 
@@ -504,3 +536,16 @@ QUILLET_TEST_SLUG=blog \
 QUILLET_ADMIN_PASSWORD=secret \
 python scripts/http_smoke_test.py
 ```
+
+## MCP server (optional extra)
+
+```bash
+pip install "quillet[mcp]"
+
+QUILLET_MCP_BASE_URL=http://127.0.0.1:8000 \
+QUILLET_MCP_PASSWORD=secret \
+QUILLET_MCP_NEWSLETTER_SLUG=spike \
+python scripts/run_mcp_server.py
+```
+
+The MCP server is a thin HTTP client over the curated JSON API — same operations, same auth.

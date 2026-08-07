@@ -113,11 +113,49 @@ def run() -> int:
         )
         failures += not _check("create post", r.status_code, 201)
 
+        r = client.get("/newsletter/blog/api/posts?status=draft", headers=auth)
+        failures += not _check("list drafts", r.status_code, 200)
+        if r.is_json:
+            draft_slugs = {p["slug"] for p in r.json.get("posts", [])}
+            failures += not _check("list drafts includes hello-world", 200 if "hello-world" in draft_slugs else 0, 200)
+        else:
+            failures += 1
+            print("  [FAIL] list drafts: expected JSON")
+
+        r = client.get("/newsletter/blog/api/posts/hello-world", headers=auth)
+        failures += not _check("get draft via API", r.status_code, 200)
+        if r.is_json and r.json.get("post", {}).get("published_at") is not None:
+            failures += 1
+            print("  [FAIL] get draft via API: expected published_at null")
+
+        r = client.put(
+            "/newsletter/blog/api/posts/hello-world",
+            json={"title": "Hello World (edited)", "body_md": "# Hello\n\nEdited."},
+            headers=auth,
+        )
+        failures += not _check("update post", r.status_code, 200)
+        if r.is_json:
+            updated = r.json.get("post", {})
+            if updated.get("title") != "Hello World (edited)" or updated.get("slug") != "hello-world":
+                failures += 1
+                print("  [FAIL] update post: title/slug mismatch")
+
         failures += not _check(
             "publish", client.post("/newsletter/blog/api/posts/hello-world/publish", headers=auth).status_code, 200
         )
         failures += not _check("public post detail", client.get("/newsletter/blog/posts/hello-world").status_code, 200)
         failures += not _check("archive has post", client.get("/newsletter/blog/").status_code, 200)
+
+        r = client.post(
+            "/newsletter/blog/api/posts/hello-world/send-test",
+            json={"email": "owner@example.com"},
+            headers=auth,
+        )
+        failures += not _check("send-test via API", r.status_code, 200)
+        r = client.get("/newsletter/blog/api/posts/hello-world", headers=auth)
+        if r.is_json and r.json.get("post", {}).get("sent_at") is not None:
+            failures += 1
+            print("  [FAIL] send-test must not set sent_at")
 
         # re-subscribe so send has a confirmed subscriber
         client.post("/newsletter/blog/subscribe", data={"email": "reader2@example.com"})
@@ -131,6 +169,12 @@ def run() -> int:
             client.post("/newsletter/blog/api/posts/hello-world/send", headers=auth).status_code,
             409,
         )
+
+        r = client.get("/newsletter/blog/api/openapi.yaml")
+        failures += not _check("openapi yaml", r.status_code, 200)
+        if b"openapi:" not in r.data[:64]:
+            failures += 1
+            print("  [FAIL] openapi yaml: missing openapi: header")
 
         print("\n-- Admin UI --")
         failures += not _check(

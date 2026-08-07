@@ -11,8 +11,8 @@ from flask import (
 )
 
 from .auth import require_basic_auth
-from .models import NewsletterConfig, Subscriber
-from .routes import _db, _email, _post_list_url, _post_url, _unsubscribe_url_template
+from .models import NewsletterConfig
+from .routes import _db, _email, _post_list_url, _post_url, _send_test_email, _unsubscribe_url_template
 
 
 def _slugify(text: str) -> str:
@@ -304,27 +304,7 @@ def register_admin_routes(bp: Blueprint) -> None:
         if not test_email:
             test_email = newsletter.reply_to or newsletter.from_email
 
-        test_subscriber = Subscriber(
-            id=0,
-            newsletter_id=newsletter.id,
-            email=test_email,
-            token="test",
-            confirmed_at=None,
-        )
-
-        config = _db().get_newsletter_config(newsletter.id)
-        prefix = f"[TEST] {config.subject_prefix or ''}".strip()
-        test_config = config._replace(subject_prefix=prefix)
-
-        _email().send_post(
-            newsletter,
-            post,
-            [test_subscriber],
-            _unsubscribe_url_template(name, newsletter_slug),
-            test_config,
-            post_url=_post_url(name, newsletter_slug, post_slug),
-            post_list_url=_post_list_url(name, newsletter_slug),
-        )
+        _send_test_email(newsletter, post, test_email, name, newsletter_slug)
 
         return redirect(
             url_for(f"{name}.edit_post", newsletter_slug=newsletter_slug, post_slug=post_slug, test_sent="1")

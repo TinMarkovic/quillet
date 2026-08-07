@@ -1,11 +1,13 @@
 import json
 import secrets
 from functools import lru_cache
+from importlib import resources
 from urllib.parse import urljoin
 
 import markdown2
 from flask import (
     Blueprint,
+    Response,
     abort,
     current_app,
     jsonify,
@@ -18,6 +20,7 @@ from flask import (
 from .auth import require_basic_auth
 from .db import NewsletterRepository
 from .email import EmailSender
+from .models import Newsletter, Post, Subscriber
 
 # ---------------------------------------------------------------------------
 # Helpers (used by admin.py too)
@@ -74,6 +77,48 @@ def _confirm_url(bp_name: str, newsletter_slug: str, token: str) -> str:
     base = _base_url()
     path = url_for(f"{bp_name}.confirm_subscription", newsletter_slug=newsletter_slug, token=token)
     return urljoin(base, path)
+
+
+def _filter_posts_by_status(posts: list[Post], status: str) -> list[Post]:
+    if status == "all":
+        return posts
+    if status == "draft":
+        return [p for p in posts if p.published_at is None]
+    if status == "published":
+        return [p for p in posts if p.published_at is not None]
+    if status == "unsent":
+        return [p for p in posts if p.published_at is not None and p.sent_at is None]
+    if status == "sent":
+        return [p for p in posts if p.sent_at is not None]
+    return posts
+
+
+def _send_test_email(
+    newsletter: Newsletter,
+    post: Post,
+    test_email: str,
+    bp_name: str,
+    newsletter_slug: str,
+) -> None:
+    test_subscriber = Subscriber(
+        id=0,
+        newsletter_id=newsletter.id,
+        email=test_email,
+        token="test",
+        confirmed_at=None,
+    )
+    config = _db().get_newsletter_config(newsletter.id)
+    prefix = f"[TEST] {config.subject_prefix or ''}".strip()
+    test_config = config._replace(subject_prefix=prefix)
+    _email().send_post(
+        newsletter,
+        post,
+        [test_subscriber],
+        _unsubscribe_url_template(bp_name, newsletter_slug),
+        test_config,
+        post_url=_post_url(bp_name, newsletter_slug, post.slug),
+        post_list_url=_post_list_url(bp_name, newsletter_slug),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +321,44 @@ def register_public_routes(bp: Blueprint) -> None:
 
     # --- API admin routes (always JSON, always Basic Auth) ---
 
+    @bp.get("/<newsletter_slug>/api/openapi.yaml")
+    def api_openapi_spec(newsletter_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        spec = resources.files("quillet").joinpath("openapi.yaml").read_text(encoding="utf-8")
+        return Response(spec, mimetype="application/yaml")
+
+    @bp.get("/<newsletter_slug>/api/posts")
+    @require_basic_auth
+    def api_list_posts(newsletter_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        status = (request.args.get("status") or "all").strip().lower()
+        allowed = {"all", "draft", "published", "unsent", "sent"}
+        if status not in allowed:
+            return jsonify(error=f"status must be one of: {', '.join(sorted(allowed))}."), 400
+
+        posts = _db().list_posts(newsletter_slug, published_only=False)
+        filtered = _filter_posts_by_status(posts, status)
+        return jsonify(posts=[p._asdict() for p in filtered])
+
+    @bp.get("/<newsletter_slug>/api/posts/<post_slug>")
+    @require_basic_auth
+    def api_get_post(newsletter_slug: str, post_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        post = _db().get_post(newsletter_slug, post_slug)
+        if post is None:
+            abort(404)
+
+        return jsonify(post=post._asdict())
+
     @bp.post("/<newsletter_slug>/api/posts")
     @require_basic_auth
     def api_create_post(newsletter_slug: str):
@@ -294,6 +377,28 @@ def register_public_routes(bp: Blueprint) -> None:
         post = _db().create_post(newsletter_slug, title, slug, body_md)
         return jsonify(post=post._asdict()), 201
 
+    @bp.put("/<newsletter_slug>/api/posts/<post_slug>")
+    @require_basic_auth
+    def api_update_post(newsletter_slug: str, post_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        post = _db().get_post(newsletter_slug, post_slug)
+        if post is None:
+            abort(404)
+
+        data = request.get_json(silent=True) or {}
+        title = (data.get("title") or "").strip()
+        body_md = (data.get("body_md") or "").strip()
+        new_slug = (data.get("slug") or "").strip() or post.slug
+
+        if not title or not body_md:
+            return jsonify(error="title and body_md are required."), 400
+
+        updated = _db().update_post(post.id, title, new_slug, body_md)
+        return jsonify(post=updated._asdict())
+
     @bp.post("/<newsletter_slug>/api/posts/<post_slug>/publish")
     @require_basic_auth
     def api_publish_post(newsletter_slug: str, post_slug: str):
@@ -307,6 +412,25 @@ def register_public_routes(bp: Blueprint) -> None:
 
         updated = _db().publish_post(post.id)
         return jsonify(post=updated._asdict())
+
+    @bp.post("/<newsletter_slug>/api/posts/<post_slug>/send-test")
+    @require_basic_auth
+    def api_send_test_post(newsletter_slug: str, post_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        post = _db().get_post(newsletter_slug, post_slug)
+        if post is None:
+            abort(404)
+
+        data = request.get_json(silent=True) or {}
+        test_email = (data.get("email") or "").strip()
+        if not test_email:
+            return jsonify(error="email is required."), 400
+
+        _send_test_email(newsletter, post, test_email, name, newsletter_slug)
+        return jsonify(ok=True)
 
     @bp.post("/<newsletter_slug>/api/posts/<post_slug>/send")
     @require_basic_auth

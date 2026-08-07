@@ -1,0 +1,511 @@
+openapi: 3.0.3
+info:
+  title: Quillet Admin API
+  version: 0.1.0
+  description: |
+    Curated admin JSON API for Quillet — newsletter / microblog CRM-light.
+
+    Authenticate every `/api/*` call (except this OpenAPI document) with HTTP Basic Auth
+    (`username` + `password` configured for the instance).
+
+    Post lifecycle:
+    - A newly created post is a **draft** (`published_at` is null).
+    - **Publish** sets `published_at` and makes the post visible on the public archive.
+    - **Send-test** emails a single address without marking the post as sent (`sent_at` stays null).
+    - **Send** emails all confirmed subscribers and sets `sent_at`. A second full send returns 409.
+servers:
+  - url: /
+    description: Quillet instance base URL (include any blueprint url_prefix)
+tags:
+  - name: posts
+    description: Create, read, update, publish, and send posts
+  - name: subscribers
+    description: List subscribers for a newsletter
+paths:
+  /{newsletter_slug}/api/posts:
+    get:
+      operationId: list_posts
+      tags: [posts]
+      summary: List posts
+      description: |
+        List posts for the newsletter, including drafts.
+
+        Use the `status` query parameter to filter:
+        - `all` (default) — every post
+        - `draft` — `published_at` is null
+        - `published` — `published_at` is set (sent or unsent)
+        - `unsent` — published but not yet full-sent (`sent_at` is null)
+        - `sent` — `sent_at` is set
+
+        Prefer `unsent` when you need a published post that has not been emailed to the list yet.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+        - name: status
+          in: query
+          required: false
+          description: Filter by lifecycle status.
+          schema:
+            type: string
+            enum: [all, draft, published, unsent, sent]
+            default: all
+          example: draft
+      responses:
+        '200':
+          description: Post list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [posts]
+                properties:
+                  posts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Post'
+              example:
+                posts:
+                  - id: 1
+                    newsletter_id: 1
+                    slug: seed-draft-alpha
+                    title: Seed Draft Alpha
+                    body_md: "# Draft\n\nNot published yet."
+                    published_at: null
+                    sent_at: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: create_post
+      tags: [posts]
+      summary: Create a draft post
+      description: |
+        Create a new draft post. The post is unpublished (`published_at` null) and unsent
+        (`sent_at` null) until you call publish / send.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePostRequest'
+            example:
+              title: Spike Note
+              slug: spike-note
+              body_md: "# Spike Note\n\nA short paragraph for the spike."
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [post]
+                properties:
+                  post:
+                    $ref: '#/components/schemas/Post'
+              example:
+                post:
+                  id: 10
+                  newsletter_id: 1
+                  slug: spike-note
+                  title: Spike Note
+                  body_md: "# Spike Note\n\nA short paragraph for the spike."
+                  published_at: null
+                  sent_at: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /{newsletter_slug}/api/posts/{post_slug}:
+    get:
+      operationId: get_post
+      tags: [posts]
+      summary: Get a single post
+      description: |
+        Fetch one post by slug, including drafts. Inspect `published_at` and `sent_at` to
+        determine lifecycle state (`null` means not published / not sent).
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+        - $ref: '#/components/parameters/PostSlug'
+      responses:
+        '200':
+          description: Post found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [post]
+                properties:
+                  post:
+                    $ref: '#/components/schemas/Post'
+              example:
+                post:
+                  id: 1
+                  newsletter_id: 1
+                  slug: seed-draft-alpha
+                  title: Seed Draft Alpha
+                  body_md: "# Draft\n\nNot published yet."
+                  published_at: null
+                  sent_at: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: update_post
+      tags: [posts]
+      summary: Update a post
+      description: |
+        Replace title and body for an existing post. `slug` is optional; omit it (or send
+        empty) to keep the current slug. Publishing/sending state is unchanged by this call.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+        - $ref: '#/components/parameters/PostSlug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePostRequest'
+            example:
+              title: Spike Note (edited)
+              body_md: "# Spike Note\n\nEdited body."
+      responses:
+        '200':
+          description: Post updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [post]
+                properties:
+                  post:
+                    $ref: '#/components/schemas/Post'
+              example:
+                post:
+                  id: 10
+                  newsletter_id: 1
+                  slug: spike-note
+                  title: Spike Note (edited)
+                  body_md: "# Spike Note\n\nEdited body."
+                  published_at: null
+                  sent_at: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /{newsletter_slug}/api/posts/{post_slug}/publish:
+    post:
+      operationId: publish_post
+      tags: [posts]
+      summary: Publish a post
+      description: |
+        Set `published_at` to now. The post becomes visible on the public archive.
+        Does not email subscribers — use send-test or send for that.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+        - $ref: '#/components/parameters/PostSlug'
+      responses:
+        '200':
+          description: Post published
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [post]
+                properties:
+                  post:
+                    $ref: '#/components/schemas/Post'
+              example:
+                post:
+                  id: 10
+                  newsletter_id: 1
+                  slug: chain-demo
+                  title: Chain Demo
+                  body_md: "# Chain\n\nPublished for a test send."
+                  published_at: "2026-08-07T12:00:00+00:00"
+                  sent_at: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /{newsletter_slug}/api/posts/{post_slug}/send-test:
+    post:
+      operationId: send_test
+      tags: [posts]
+      summary: Send a test email
+      description: |
+        Email this post to a single address for preview. Does **not** mark the post as sent
+        (`sent_at` remains null) and does **not** email the subscriber list.
+
+        Prefer this over full send when you only need a personal preview.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+        - $ref: '#/components/parameters/PostSlug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: Destination address for the test email.
+              example:
+                email: owner@example.com
+      responses:
+        '200':
+          description: Test email accepted by the configured email backend
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+              example:
+                ok: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /{newsletter_slug}/api/posts/{post_slug}/send:
+    post:
+      operationId: send_post
+      tags: [posts]
+      summary: Full-send a post to confirmed subscribers
+      description: |
+        Email the post to every confirmed subscriber and set `sent_at`.
+
+        Requirements:
+        - Post must already be published (`published_at` set) — otherwise 400.
+        - Post must not already have been sent (`sent_at` null) — otherwise 409.
+
+        Do not use this when you only want a personal preview; use send-test instead.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+        - $ref: '#/components/parameters/PostSlug'
+      responses:
+        '200':
+          description: Post emailed to the list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, recipients]
+                properties:
+                  ok:
+                    type: boolean
+                  recipients:
+                    type: integer
+                    description: Number of confirmed subscribers emailed
+              example:
+                ok: true
+                recipients: 3
+        '400':
+          description: Post is not published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Post must be published before sending.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Post was already sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Post has already been sent.
+
+  /{newsletter_slug}/api/subscribers:
+    get:
+      operationId: list_subscribers
+      tags: [subscribers]
+      summary: List subscribers
+      description: |
+        List all subscribers for the newsletter (confirmed and pending).
+        Inspect `confirmed_at` — null means the double opt-in is still pending.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+      responses:
+        '200':
+          description: Subscriber list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subscribers]
+                properties:
+                  subscribers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Subscriber'
+              example:
+                subscribers:
+                  - id: 1
+                    newsletter_id: 1
+                    email: reader1@example.com
+                    token: abc123
+                    confirmed_at: "2026-08-01T10:00:00+00:00"
+                    unsubscribed: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic Auth. Username and password are the Quillet admin credentials.
+
+  parameters:
+    NewsletterSlug:
+      name: newsletter_slug
+      in: path
+      required: true
+      description: Newsletter URL slug (e.g. `spike`).
+      schema:
+        type: string
+      example: spike
+    PostSlug:
+      name: post_slug
+      in: path
+      required: true
+      description: Post URL slug unique within the newsletter.
+      schema:
+        type: string
+      example: seed-draft-alpha
+
+  schemas:
+    Post:
+      type: object
+      required: [id, newsletter_id, slug, title, body_md]
+      properties:
+        id:
+          type: integer
+        newsletter_id:
+          type: integer
+        slug:
+          type: string
+        title:
+          type: string
+        body_md:
+          type: string
+          description: Markdown body source
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null means draft
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: null means not yet full-sent to the list
+    CreatePostRequest:
+      type: object
+      required: [title, slug, body_md]
+      properties:
+        title:
+          type: string
+        slug:
+          type: string
+        body_md:
+          type: string
+    UpdatePostRequest:
+      type: object
+      required: [title, body_md]
+      properties:
+        title:
+          type: string
+        body_md:
+          type: string
+        slug:
+          type: string
+          description: Optional. Omit or leave empty to keep the existing slug.
+    Subscriber:
+      type: object
+      required: [id, newsletter_id, email, token]
+      properties:
+        id:
+          type: integer
+        newsletter_id:
+          type: integer
+        email:
+          type: string
+          format: email
+        token:
+          type: string
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        unsubscribed:
+          type: boolean
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request body or query parameter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: title and body_md are required.
+    Unauthorized:
+      description: Missing or invalid Basic Auth credentials
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: Authentication required.
+    NotFound:
+      description: Newsletter or post not found

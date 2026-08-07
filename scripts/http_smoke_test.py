@@ -143,17 +143,61 @@ def test_post_lifecycle(failures: list) -> None:
     )
     failures += [1] if not check("create post", status, 201) else []
 
+    status, data = req("GET", f"/{SLUG}/api/posts?status=draft", headers=auth)
+    failures += [1] if not check("list drafts", status, 200) else []
+    if isinstance(data, dict):
+        draft_slugs = {p["slug"] for p in data.get("posts", [])}
+        failures += (
+            [1]
+            if not check("list drafts includes docker-test-post", 200 if "docker-test-post" in draft_slugs else 0, 200)
+            else []
+        )
+
+    status, data = req("GET", f"/{SLUG}/api/posts/docker-test-post", headers=auth)
+    failures += [1] if not check("get draft via API", status, 200) else []
+
+    status, data = req(
+        "PUT",
+        f"/{SLUG}/api/posts/docker-test-post",
+        body={"title": "Docker Test Post (edited)", "body_md": "# Hello\n\nEdited."},
+        headers=auth,
+    )
+    failures += [1] if not check("update post", status, 200) else []
+    if isinstance(data, dict):
+        post = data.get("post", {})
+        title_ok = post.get("title") == "Docker Test Post (edited)" and post.get("slug") == "docker-test-post"
+        failures += [1] if not check("update keeps slug", 200 if title_ok else 0, 200) else []
+
     status, _ = req("POST", f"/{SLUG}/api/posts/docker-test-post/publish", headers=auth)
     failures += [1] if not check("publish", status, 200) else []
 
     failures += [1] if not check("post detail", req("GET", f"/{SLUG}/posts/docker-test-post")[0], 200) else []
     failures += [1] if not check("archive has post", req("GET", f"/{SLUG}/")[0], 200) else []
 
+    status, data = req(
+        "POST",
+        f"/{SLUG}/api/posts/docker-test-post/send-test",
+        body={"email": "owner@example.com"},
+        headers=auth,
+    )
+    failures += [1] if not check("send-test via API", status, 200) else []
+    status, data = req("GET", f"/{SLUG}/api/posts/docker-test-post", headers=auth)
+    if isinstance(data, dict) and data.get("post", {}).get("sent_at") is not None:
+        failures.append(1)
+        print("  FAIL send-test must not set sent_at")
+
     status, _ = req("POST", f"/{SLUG}/api/posts/docker-test-post/send", headers=auth)
     failures += [1] if not check("send post", status, 200) else []
 
     status, _ = req("POST", f"/{SLUG}/api/posts/docker-test-post/send", headers=auth)
     failures += [1] if not check("double send → 409", status, 409) else []
+
+    status, data = req("GET", f"/{SLUG}/api/openapi.yaml")
+    failures += [1] if not check("openapi yaml", status, 200) else []
+    body = data if isinstance(data, str) else str(data)
+    if "openapi:" not in body[:64]:
+        failures.append(1)
+        print("  FAIL openapi yaml: missing openapi: header")
 
 
 def test_admin_ui(failures: list) -> None:
