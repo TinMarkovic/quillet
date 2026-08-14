@@ -38,6 +38,9 @@ paths:
         - `sent` — `sent_at` is set
 
         Prefer `unsent` when you need a published post that has not been emailed to the list yet.
+
+        Paginated newest-first. Pass `cursor` from a previous `next_cursor` for the next older
+        page. `limit` defaults to 20 (max 100). Loop until `next_cursor` is null.
       security:
         - basicAuth: []
       parameters:
@@ -51,6 +54,8 @@ paths:
             enum: [all, draft, published, unsent, sent]
             default: all
           example: draft
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: Post list
@@ -64,6 +69,10 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Post'
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next older page, or null on the last page.
               example:
                 posts:
                   - id: 1
@@ -73,6 +82,7 @@ paths:
                     body_md: "# Draft\n\nNot published yet."
                     published_at: null
                     sent_at: null
+                next_cursor: null
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -361,12 +371,15 @@ paths:
       tags: [subscribers]
       summary: List subscribers
       description: |
-        List all subscribers for the newsletter (confirmed and pending).
+        List subscribers for the newsletter (confirmed and pending), a page at a time.
         Inspect `confirmed_at` — null means the double opt-in is still pending.
+        Pass `cursor` from a previous `next_cursor` for the next older page.
       security:
         - basicAuth: []
       parameters:
         - $ref: '#/components/parameters/NewsletterSlug'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: Subscriber list
@@ -380,6 +393,10 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Subscriber'
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    description: Opaque cursor for the next older page, or null on the last page.
               example:
                 subscribers:
                   - id: 1
@@ -388,6 +405,8 @@ paths:
                     token: abc123
                     confirmed_at: "2026-08-01T10:00:00+00:00"
                     unsubscribed: false
+                    created_at: "2026-08-01T09:55:00+00:00"
+                next_cursor: null
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -417,6 +436,23 @@ components:
       schema:
         type: string
       example: hello-world
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque keyset cursor from a previous `next_cursor`. Invalid values return 400.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size (default 20, max 100).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
 
   schemas:
     Post:
@@ -484,6 +520,10 @@ components:
           nullable: true
         unsubscribed:
           type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
     Error:
       type: object
       required: [error]

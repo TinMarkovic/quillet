@@ -14,21 +14,7 @@ from flask import Flask
 
 from .db import NewsletterRepository
 from .email import EmailSender
-from .models import Newsletter, Post
-
-
-def filter_posts_by_status(posts: list[Post], status: str) -> list[Post]:
-    if status == "all":
-        return posts
-    if status == "draft":
-        return [p for p in posts if p.published_at is None]
-    if status == "published":
-        return [p for p in posts if p.published_at is not None]
-    if status == "unsent":
-        return [p for p in posts if p.published_at is not None and p.sent_at is None]
-    if status == "sent":
-        return [p for p in posts if p.sent_at is not None]
-    return posts
+from .models import PAGE_SIZE, InvalidCursor, Newsletter, clamp_limit
 
 
 class OpError(NamedTuple):
@@ -55,6 +41,8 @@ def list_posts(
     db: NewsletterRepository,
     newsletter_slug: str,
     status: str = "all",
+    cursor: str | None = None,
+    limit: str | int | None = None,
 ) -> tuple[dict[str, Any], int]:
     newsletter = _require_newsletter(db, newsletter_slug)
     if isinstance(newsletter, OpError):
@@ -65,9 +53,23 @@ def list_posts(
     if status_key not in allowed:
         return _err(f"status must be one of: {', '.join(sorted(allowed))}.", 400)
 
-    posts = db.list_posts(newsletter_slug, published_only=False)
-    filtered = filter_posts_by_status(posts, status_key)
-    return _ok({"posts": [p._asdict() for p in filtered]})
+    try:
+        page_size = clamp_limit(int(limit)) if limit not in (None, "") else PAGE_SIZE
+    except (TypeError, ValueError):
+        return _err("limit must be an integer.", 400)
+
+    try:
+        page = db.list_posts(
+            newsletter_slug,
+            published_only=False,
+            limit=page_size,
+            before=cursor or None,
+            status=None if status_key == "all" else status_key,
+        )
+    except InvalidCursor:
+        return _err("invalid cursor.", 400)
+
+    return _ok({"posts": [p._asdict() for p in page.items], "next_cursor": page.next_cursor})
 
 
 def get_post(
@@ -219,13 +221,24 @@ def send_post(
 def list_subscribers(
     db: NewsletterRepository,
     newsletter_slug: str,
+    cursor: str | None = None,
+    limit: str | int | None = None,
 ) -> tuple[dict[str, Any], int]:
     newsletter = _require_newsletter(db, newsletter_slug)
     if isinstance(newsletter, OpError):
         return _err(newsletter.error, newsletter.status)
 
-    subscribers = db.list_all_subscribers(newsletter_slug)
-    return _ok({"subscribers": [s._asdict() for s in subscribers]})
+    try:
+        page_size = clamp_limit(int(limit)) if limit not in (None, "") else PAGE_SIZE
+    except (TypeError, ValueError):
+        return _err("limit must be an integer.", 400)
+
+    try:
+        page = db.list_all_subscribers(newsletter_slug, limit=page_size, before=cursor or None)
+    except InvalidCursor:
+        return _err("invalid cursor.", 400)
+
+    return _ok({"subscribers": [s._asdict() for s in page.items], "next_cursor": page.next_cursor})
 
 
 def to_json_text(payload: dict[str, Any], status: int) -> str:

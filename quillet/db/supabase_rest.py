@@ -2,7 +2,19 @@ from datetime import datetime, timezone
 
 import requests
 
-from ..models import Newsletter, Post, Subscriber
+from ..models import (
+    CONFIRM_TTL,
+    PAGE_SIZE,
+    InvalidCursor,
+    Newsletter,
+    Page,
+    Post,
+    Subscriber,
+    clamp_limit,
+    decode_cursor,
+    encode_cursor,
+    is_pending_expired,
+)
 
 _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S"
 
@@ -30,7 +42,9 @@ class SupabaseRestRepository:
     DB connection string is not available.
 
     Requires tables: newsletters, posts, subscribers
-    (same schema as SQLAlchemyRepository).
+    (same schema as SQLAlchemyRepository). Hosts must include
+    ``subscribers.created_at`` (timestamptz). Pending rows older than 3 days
+    are hard-deleted on subscriber-touch.
     """
 
     def __init__(self, supabase_url: str, supabase_key: str) -> None:
@@ -117,6 +131,7 @@ class SupabaseRestRepository:
             token=row["token"],
             confirmed_at=_parse_dt(row.get("confirmed_at")),
             unsubscribed=bool(row.get("unsubscribed", False)),
+            created_at=_parse_dt(row.get("created_at")),
         )
 
     def _get_newsletter_id(self, slug: str) -> int | None:
@@ -147,17 +162,67 @@ class SupabaseRestRepository:
             return None
         return self._row_to_newsletter(rows[0])
 
+    def list_newsletter_slugs(self) -> list[str]:
+        rows = self._get("newsletters", {"select": "slug"})
+        return [row["slug"] for row in rows]
+
     # --- Posts ---
 
-    def list_posts(self, newsletter_slug: str, published_only: bool = True) -> list[Post]:
+    def list_posts(
+        self,
+        newsletter_slug: str,
+        published_only: bool = True,
+        *,
+        limit: int = PAGE_SIZE,
+        before: str | None = None,
+        status: str | None = None,
+    ) -> Page:
         newsletter_id = self._get_newsletter_id(newsletter_slug)
         if newsletter_id is None:
-            return []
-        params: dict = {"newsletter_id": f"eq.{newsletter_id}", "order": "published_at.desc"}
-        if published_only:
+            return Page([], None)
+
+        page_size = clamp_limit(limit)
+        params: dict = {
+            "newsletter_id": f"eq.{newsletter_id}",
+            "limit": str(page_size + 1),
+        }
+        if published_only or status in ("published", "unsent", "sent"):
             params["published_at"] = "not.is.null"
+        if status == "draft":
+            params["published_at"] = "is.null"
+        if status == "unsent":
+            params["sent_at"] = "is.null"
+        if status == "sent":
+            params["sent_at"] = "not.is.null"
+
+        if published_only:
+            params["order"] = "published_at.desc,id.desc"
+        else:
+            params["order"] = "id.desc"
+
+        if before:
+            parts = decode_cursor(before)
+            if published_only:
+                if len(parts) != 3 or parts[0] != "p":
+                    raise InvalidCursor("invalid cursor")
+                ts = parts[1]
+                post_id = parts[2]
+                params["or"] = f"(published_at.lt.{ts},and(published_at.eq.{ts},id.lt.{post_id}))"
+            else:
+                if len(parts) != 2 or parts[0] != "i":
+                    raise InvalidCursor("invalid cursor")
+                params["id"] = f"lt.{parts[1]}"
+
         rows = self._get("posts", params)
-        return [self._row_to_post(r) for r in rows]
+        posts = [self._row_to_post(r) for r in rows[:page_size]]
+        if len(rows) <= page_size:
+            return Page(posts, None)
+        last = posts[-1]
+        if published_only:
+            cursor = encode_cursor("p", last.published_at.isoformat(), str(last.id))
+        else:
+            cursor = encode_cursor("i", str(last.id))
+        return Page(posts, cursor)
 
     def get_post(self, newsletter_slug: str, post_slug: str) -> Post | None:
         newsletter_id = self._get_newsletter_id(newsletter_slug)
@@ -200,9 +265,16 @@ class SupabaseRestRepository:
         newsletter_id = self._get_newsletter_id(newsletter_slug)
         if newsletter_id is None:
             raise ValueError(f"Newsletter not found: {newsletter_slug}")
+        self.purge_expired_pending(newsletter_id)
         row = self._post(
             "subscribers",
-            {"newsletter_id": newsletter_id, "email": email, "token": token, "unsubscribed": False},
+            {
+                "newsletter_id": newsletter_id,
+                "email": email,
+                "token": token,
+                "unsubscribed": False,
+                "created_at": _fmt_dt(datetime.now(timezone.utc)),
+            },
         )
         return self._row_to_subscriber(row)
 
@@ -210,9 +282,19 @@ class SupabaseRestRepository:
         rows = self._get("subscribers", {"token": f"eq.{token}"})
         if not rows:
             return None
+        subscriber = self._row_to_subscriber(rows[0])
+        self.purge_expired_pending(subscriber.newsletter_id)
+        if is_pending_expired(subscriber.created_at, subscriber.confirmed_at):
+            return None
         now = _fmt_dt(datetime.now(timezone.utc))
         row = self._patch("subscribers", {"token": token}, {"confirmed_at": now})
         return self._row_to_subscriber(row)
+
+    def get_subscriber_by_token(self, token: str) -> Subscriber | None:
+        rows = self._get("subscribers", {"token": f"eq.{token}"})
+        if not rows:
+            return None
+        return self._row_to_subscriber(rows[0])
 
     def list_confirmed_subscribers(self, newsletter_slug: str) -> list[Subscriber]:
         newsletter_id = self._get_newsletter_id(newsletter_slug)
@@ -228,15 +310,50 @@ class SupabaseRestRepository:
         )
         return [self._row_to_subscriber(r) for r in rows]
 
-    def list_all_subscribers(self, newsletter_slug: str) -> list[Subscriber]:
+    def list_all_subscribers(
+        self,
+        newsletter_slug: str,
+        *,
+        limit: int = PAGE_SIZE,
+        before: str | None = None,
+    ) -> Page:
         newsletter_id = self._get_newsletter_id(newsletter_slug)
         if newsletter_id is None:
-            return []
+            return Page([], None)
+        self.purge_expired_pending(newsletter_id)
+        page_size = clamp_limit(limit)
+        params: dict = {
+            "newsletter_id": f"eq.{newsletter_id}",
+            "order": "created_at.desc,id.desc",
+            "limit": str(page_size + 1),
+        }
+        if before:
+            parts = decode_cursor(before)
+            if len(parts) != 3 or parts[0] != "s":
+                raise InvalidCursor("invalid cursor")
+            params["or"] = f"(created_at.lt.{parts[1]},and(created_at.eq.{parts[1]},id.lt.{parts[2]}))"
+        rows = self._get("subscribers", params)
+        items = [self._row_to_subscriber(r) for r in rows[:page_size]]
+        if len(rows) <= page_size:
+            return Page(items, None)
+        last = items[-1]
+        created = last.created_at or datetime.now(timezone.utc)
+        return Page(items, encode_cursor("s", created.isoformat(), str(last.id)))
+
+    def purge_expired_pending(self, newsletter_id: int) -> int:
+        cutoff = _fmt_dt(datetime.now(timezone.utc) - CONFIRM_TTL)
         rows = self._get(
             "subscribers",
-            {"newsletter_id": f"eq.{newsletter_id}"},
+            {
+                "newsletter_id": f"eq.{newsletter_id}",
+                "confirmed_at": "is.null",
+                "created_at": f"lt.{cutoff}",
+                "select": "id",
+            },
         )
-        return [self._row_to_subscriber(r) for r in rows]
+        for row in rows:
+            self._delete("subscribers", {"id": row["id"]})
+        return len(rows)
 
     def unsubscribe(self, token: str) -> None:
         self._patch("subscribers", {"token": token}, {"unsubscribed": True})
@@ -265,6 +382,7 @@ class SupabaseRestRepository:
     # --- Subscriber lookup ---
 
     def get_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
+        self.purge_expired_pending(newsletter_id)
         rows = self._get(
             "subscribers",
             {

@@ -1,10 +1,12 @@
 from typing import Protocol
 
-from ..models import Newsletter, NewsletterConfig, Post, Subscriber
+from ..models import PAGE_SIZE, Newsletter, NewsletterConfig, Page, Post, Subscriber
 
 
 class NewsletterRepository(Protocol):
     def get_newsletter(self, slug: str) -> Newsletter | None: ...
+
+    def list_newsletter_slugs(self) -> list[str]: ...
 
     def update_newsletter(
         self, newsletter_id: int, name: str, from_name: str, from_email: str, reply_to: str | None
@@ -14,7 +16,15 @@ class NewsletterRepository(Protocol):
 
     def save_newsletter_config(self, config: NewsletterConfig) -> None: ...
 
-    def list_posts(self, newsletter_slug: str, published_only: bool = True) -> list[Post]: ...
+    def list_posts(
+        self,
+        newsletter_slug: str,
+        published_only: bool = True,
+        *,
+        limit: int = PAGE_SIZE,
+        before: str | None = None,
+        status: str | None = None,
+    ) -> Page: ...
 
     def get_post(self, newsletter_slug: str, post_slug: str) -> Post | None: ...
 
@@ -32,9 +42,19 @@ class NewsletterRepository(Protocol):
 
     def confirm_subscriber(self, token: str) -> Subscriber | None: ...
 
+    def get_subscriber_by_token(self, token: str) -> Subscriber | None: ...
+
     def list_confirmed_subscribers(self, newsletter_slug: str) -> list[Subscriber]: ...
 
-    def list_all_subscribers(self, newsletter_slug: str) -> list[Subscriber]: ...
+    def list_all_subscribers(
+        self,
+        newsletter_slug: str,
+        *,
+        limit: int = PAGE_SIZE,
+        before: str | None = None,
+    ) -> Page: ...
+
+    def purge_expired_pending(self, newsletter_id: int) -> int: ...
 
     def unsubscribe(self, token: str) -> None: ...
 

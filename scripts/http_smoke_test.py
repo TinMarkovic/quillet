@@ -229,7 +229,8 @@ def test_json_mode(failures: list) -> None:
 def test_unsubscribe(failures: list, token: str | None) -> None:
     print("\n-- Unsubscribe --")
     if token:
-        failures += [1] if not check("unsubscribe", req("GET", f"/{SLUG}/unsubscribe/{token}")[0], 200) else []
+        failures += [1] if not check("unsubscribe GET", req("GET", f"/{SLUG}/unsubscribe/{token}")[0], 200) else []
+        failures += [1] if not check("unsubscribe POST", req("POST", f"/{SLUG}/unsubscribe/{token}")[0], 200) else []
     else:
         print("  SKIP  (no token available)")
 

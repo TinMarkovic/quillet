@@ -54,6 +54,8 @@ After the file is saved, refresh MCP in Cursor (Settings → MCP) or start a new
 
 `list_posts` · `get_post` · `create_post` · `update_post` · `publish_post` · `send_test` · `send_post` · `list_subscribers`
 
+`list_posts` and `list_subscribers` return a page (`next_cursor`). Pass `cursor` to fetch older rows; loop until `next_cursor` is null. `send_post` emails the full confirmed list (not a page).
+
 Same operations as the JSON API. Read the OpenAPI document if you need request/response shapes.
 
 ## If you only need REST

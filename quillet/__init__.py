@@ -21,5 +21,13 @@ Quick start::
 """
 
 from .factory import create_app, create_asgi_app, create_blueprint, get_or_create_newsletter
+from .robots import register_robots, robots_txt
 
-__all__ = ["create_app", "create_asgi_app", "create_blueprint", "get_or_create_newsletter"]
+__all__ = [
+    "create_app",
+    "create_asgi_app",
+    "create_blueprint",
+    "get_or_create_newsletter",
+    "register_robots",
+    "robots_txt",
+]

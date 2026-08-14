@@ -63,8 +63,10 @@ def build_mcp(app: Flask, newsletter_slug: str) -> FastMCP:
         return api_ops.to_json_text(payload, status)
 
     @mcp.tool()
-    def list_posts(status: str = "all") -> str:
-        """List posts for the newsletter, including drafts.
+    def list_posts(status: str = "all", cursor: str = "") -> str:
+        """List posts for the newsletter, including drafts. Returns a page of 20.
+
+        Pass cursor from next_cursor to fetch the next older page. Loop until next_cursor is null.
 
         Use the status parameter to filter:
         - all (default) — every post
@@ -74,7 +76,7 @@ def build_mcp(app: Flask, newsletter_slug: str) -> FastMCP:
         - sent — sent_at is set
 
         Prefer unsent when you need a published post that has not been emailed to the list yet."""
-        payload, code = api_ops.list_posts(_db(), newsletter_slug, status=status)
+        payload, code = api_ops.list_posts(_db(), newsletter_slug, status=status, cursor=cursor or None)
         return _result(payload, code)
 
     @mcp.tool()
@@ -127,10 +129,12 @@ def build_mcp(app: Flask, newsletter_slug: str) -> FastMCP:
         return _result(payload, code)
 
     @mcp.tool()
-    def list_subscribers() -> str:
-        """List all subscribers for the newsletter (confirmed and pending).
-        Inspect confirmed_at — null means the double opt-in is still pending."""
-        payload, code = api_ops.list_subscribers(_db(), newsletter_slug)
+    def list_subscribers(cursor: str = "") -> str:
+        """List subscribers for the newsletter (confirmed and pending), a page at a time.
+
+        Pass cursor from next_cursor for the next older page. Inspect confirmed_at —
+        null means the double opt-in is still pending."""
+        payload, code = api_ops.list_subscribers(_db(), newsletter_slug, cursor=cursor or None)
         return _result(payload, code)
 
     return mcp
@@ -180,12 +184,6 @@ def _newsletter_slugs(flask_app: Flask) -> list[str]:
         return env_slugs
 
     db = flask_app.config["QUILLET_DB"]
-    from .db.sqlalchemy import SQLAlchemyRepository
-
-    if not isinstance(db, SQLAlchemyRepository):
-        logger.warning("Cannot auto-discover newsletter slugs for MCP on this DB backend; set QUILLET_MCP_SLUGS")
-        return []
-
     return db.list_newsletter_slugs()
 
 

@@ -1,0 +1,42 @@
+{% for post in posts %}
+<tr>
+  <td>
+    <a href="{{ url_for('quillet.edit_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+      {{ post.title }}
+    </a>
+  </td>
+  <td>
+    {% if post.sent_at %}
+      <span class="badge badge-sent">Sent</span>
+    {% elif post.published_at %}
+      <span class="badge badge-published">Published</span>
+    {% else %}
+      <span class="badge badge-draft">Draft</span>
+    {% endif %}
+  </td>
+  <td class="muted">
+    {{ post.published_at.strftime('%b %d, %Y') if post.published_at else '—' }}
+  </td>
+  <td class="actions">
+    {% if not post.published_at %}
+      <form method="post" action="{{ url_for('quillet.publish_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+        <button class="btn" type="submit">Publish</button>
+      </form>
+    {% endif %}
+    {% if post.published_at and not post.sent_at %}
+      <form method="post" action="{{ url_for('quillet.send_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}"
+            onsubmit="return confirm('Send to {{ confirmed_count }} subscriber(s)?')">
+        <button class="btn" type="submit" style="background:#28a745;">Send</button>
+      </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('quillet.delete_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}"
+          data-confirm="{% if post.sent_at %}This post was already sent. Delete anyway?{% else %}Delete this post?{% endif %}"
+          onsubmit="return confirm(this.dataset.confirm)">
+      <button class="btn btn-danger" type="submit">Delete</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+{% if next_cursor %}
+<tr hidden data-next-cursor="{{ next_cursor }}"></tr>
+{% endif %}

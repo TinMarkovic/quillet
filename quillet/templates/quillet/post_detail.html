@@ -5,6 +5,17 @@
 {% block description %}{{ post_html | striptags | truncate(160, killwords=False, end='') | trim }}{% endblock %}
 {% block canonical %}{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug, _external=True) }}{% endblock %}
 
+{% block head %}
+<link rel="alternate" type="text/markdown" href="{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+<link rel="alternate" type="application/json" href="{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+{% endblock %}
+
+{% block jsonld %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":{{ post.title | tojson }},"datePublished":{{ (post.published_at.isoformat() if post.published_at else none) | tojson }},"author":{"@type":"Person","name":{{ newsletter.from_name | tojson }}},"url":{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug, _external=True) | tojson }}}
+</script>
+{% endblock %}
+
 {% block content %}
 <p class="muted">
   <a href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">← {{ newsletter.name }}</a>

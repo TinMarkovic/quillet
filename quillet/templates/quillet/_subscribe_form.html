@@ -1,0 +1,8 @@
+<form class="subscribe-form" method="post"
+      action="{{ url_for('quillet.subscribe', newsletter_slug=newsletter.slug) }}">
+  <input type="email" name="email" placeholder="your@email.com" required>
+  <button type="submit">Subscribe</button>
+</form>
+{% if subscribe_error %}
+  <p style="color:#cc0000;">{{ subscribe_error }}</p>
+{% endif %}

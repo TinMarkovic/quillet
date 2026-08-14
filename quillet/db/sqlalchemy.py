@@ -11,13 +11,33 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    and_,
     create_engine,
+    delete,
     event,
+    inspect,
+    or_,
     select,
+    text,
     update,
 )
 
-from ..models import CONFIG_DEFAULTS, AuditEvent, Newsletter, NewsletterConfig, Post, Subscriber
+from ..models import (
+    CONFIG_DEFAULTS,
+    CONFIRM_TTL,
+    PAGE_SIZE,
+    AuditEvent,
+    InvalidCursor,
+    Newsletter,
+    NewsletterConfig,
+    Page,
+    Post,
+    Subscriber,
+    clamp_limit,
+    decode_cursor,
+    encode_cursor,
+    is_pending_expired,
+)
 
 metadata = MetaData()
 
@@ -53,6 +73,7 @@ _subscribers = Table(
     Column("token", String(64), unique=True, nullable=False),
     Column("confirmed_at", DateTime, nullable=True),
     Column("unsubscribed", Boolean, default=False, nullable=False),
+    Column("created_at", DateTime, nullable=True),
 )
 
 _newsletter_config = Table(
@@ -106,6 +127,7 @@ def _row_to_subscriber(row) -> Subscriber:
         token=row.token,
         unsubscribed=bool(row.unsubscribed),
         confirmed_at=row.confirmed_at,
+        created_at=row.created_at,
     )
 
 
@@ -128,7 +150,66 @@ def _assemble_newsletter_config(newsletter_id: int, rows) -> NewsletterConfig:
         email_opener=merged["email_opener"],
         email_footer=merged["email_footer"],
         post_header_template=merged["post_header_template"],
+        subscribe_position=merged["subscribe_position"] or "end",
+        public_description=merged["public_description"],
     )
+
+
+def _ensure_subscriber_created_at(engine) -> None:
+    columns = {col["name"] for col in inspect(engine).get_columns("subscribers")}
+    with engine.begin() as conn:
+        if "created_at" not in columns:
+            conn.execute(text("ALTER TABLE subscribers ADD COLUMN created_at TIMESTAMP"))
+        conn.execute(text("UPDATE subscribers SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _cutoff_naive() -> datetime:
+    return (_utc_now() - CONFIRM_TTL).replace(tzinfo=None)
+
+
+def _filter_posts(query, published_only: bool, status: str | None):
+    if published_only:
+        return query.where(_posts.c.published_at.isnot(None))
+    if status in (None, "all"):
+        return query
+    if status == "draft":
+        return query.where(_posts.c.published_at.is_(None))
+    if status == "published":
+        return query.where(_posts.c.published_at.isnot(None))
+    if status == "unsent":
+        return query.where(_posts.c.published_at.isnot(None), _posts.c.sent_at.is_(None))
+    if status == "sent":
+        return query.where(_posts.c.sent_at.isnot(None))
+    return query
+
+
+def _apply_post_cursor(query, published_only: bool, before: str | None):
+    if not before:
+        return query
+    parts = decode_cursor(before)
+    try:
+        if published_only:
+            if len(parts) != 3 or parts[0] != "p":
+                raise InvalidCursor("invalid cursor")
+            published_at = datetime.fromisoformat(parts[1])
+            post_id = int(parts[2])
+            return query.where(
+                or_(
+                    _posts.c.published_at < published_at,
+                    and_(_posts.c.published_at == published_at, _posts.c.id < post_id),
+                )
+            )
+        if len(parts) != 2 or parts[0] != "i":
+            raise InvalidCursor("invalid cursor")
+        return query.where(_posts.c.id < int(parts[1]))
+    except InvalidCursor:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise InvalidCursor("invalid cursor") from exc
 
 
 class SQLAlchemyRepository:
@@ -146,6 +227,7 @@ class SQLAlchemyRepository:
                 dbapi_conn.execute("PRAGMA journal_mode=WAL")
 
         metadata.create_all(self._engine)
+        _ensure_subscriber_created_at(self._engine)
 
     # --- Newsletters ---
 
@@ -200,6 +282,8 @@ class SQLAlchemyRepository:
             "email_opener": config.email_opener,
             "email_footer": config.email_footer,
             "post_header_template": config.post_header_template,
+            "subscribe_position": config.subscribe_position,
+            "public_description": config.public_description,
         }
         with self._engine.begin() as conn:
             for key, value in kv.items():
@@ -230,19 +314,39 @@ class SQLAlchemyRepository:
 
     # --- Posts ---
 
-    def list_posts(self, newsletter_slug: str, published_only: bool = True) -> list[Post]:
+    def list_posts(
+        self,
+        newsletter_slug: str,
+        published_only: bool = True,
+        *,
+        limit: int = PAGE_SIZE,
+        before: str | None = None,
+        status: str | None = None,
+    ) -> Page:
+        page_size = clamp_limit(limit)
         with self._engine.connect() as conn:
             newsletter = conn.execute(select(_newsletters).where(_newsletters.c.slug == newsletter_slug)).one_or_none()
             if newsletter is None:
-                return []
+                return Page([], None)
 
             query = select(_posts).where(_posts.c.newsletter_id == newsletter.id)
+            query = _filter_posts(query, published_only=published_only, status=status)
+            query = _apply_post_cursor(query, published_only=published_only, before=before)
             if published_only:
-                query = query.where(_posts.c.published_at.isnot(None))
-            query = query.order_by(_posts.c.published_at.desc())
-            rows = conn.execute(query).fetchall()
+                query = query.order_by(_posts.c.published_at.desc(), _posts.c.id.desc())
+            else:
+                query = query.order_by(_posts.c.id.desc())
+            rows = conn.execute(query.limit(page_size + 1)).fetchall()
 
-        return [_row_to_post(r) for r in rows]
+        posts = [_row_to_post(r) for r in rows[:page_size]]
+        if len(rows) <= page_size:
+            return Page(posts, None)
+        last = posts[-1]
+        if published_only:
+            cursor = encode_cursor("p", last.published_at.isoformat(), str(last.id))
+        else:
+            cursor = encode_cursor("i", str(last.id))
+        return Page(posts, cursor)
 
     def get_post(self, newsletter_slug: str, post_slug: str) -> Post | None:
         with self._engine.connect() as conn:
@@ -299,6 +403,8 @@ class SQLAlchemyRepository:
     def add_subscriber(self, newsletter_slug: str, email: str, token: str) -> Subscriber:
         with self._engine.begin() as conn:
             newsletter = conn.execute(select(_newsletters).where(_newsletters.c.slug == newsletter_slug)).one()
+        self.purge_expired_pending(newsletter.id)
+        with self._engine.begin() as conn:
             result = conn.execute(
                 _subscribers.insert().values(
                     newsletter_id=newsletter.id,
@@ -306,6 +412,7 @@ class SQLAlchemyRepository:
                     token=token,
                     confirmed_at=None,
                     unsubscribed=False,
+                    created_at=_utc_now(),
                 )
             )
             row = conn.execute(select(_subscribers).where(_subscribers.c.id == result.inserted_primary_key[0])).one()
@@ -316,12 +423,22 @@ class SQLAlchemyRepository:
             row = conn.execute(select(_subscribers).where(_subscribers.c.token == token)).one_or_none()
             if row is None:
                 return None
-            conn.execute(
-                update(_subscribers)
-                .where(_subscribers.c.token == token)
-                .values(confirmed_at=datetime.now(timezone.utc))
-            )
-            row = conn.execute(select(_subscribers).where(_subscribers.c.token == token)).one()
+            subscriber = _row_to_subscriber(row)
+        self.purge_expired_pending(subscriber.newsletter_id)
+        if is_pending_expired(subscriber.created_at, subscriber.confirmed_at):
+            return None
+        with self._engine.begin() as conn:
+            conn.execute(update(_subscribers).where(_subscribers.c.token == token).values(confirmed_at=_utc_now()))
+            row = conn.execute(select(_subscribers).where(_subscribers.c.token == token)).one_or_none()
+        if row is None:
+            return None
+        return _row_to_subscriber(row)
+
+    def get_subscriber_by_token(self, token: str) -> Subscriber | None:
+        with self._engine.connect() as conn:
+            row = conn.execute(select(_subscribers).where(_subscribers.c.token == token)).one_or_none()
+        if row is None:
+            return None
         return _row_to_subscriber(row)
 
     def list_confirmed_subscribers(self, newsletter_slug: str) -> list[Subscriber]:
@@ -338,13 +455,58 @@ class SQLAlchemyRepository:
             ).fetchall()
         return [_row_to_subscriber(r) for r in rows]
 
-    def list_all_subscribers(self, newsletter_slug: str) -> list[Subscriber]:
+    def list_all_subscribers(
+        self,
+        newsletter_slug: str,
+        *,
+        limit: int = PAGE_SIZE,
+        before: str | None = None,
+    ) -> Page:
         with self._engine.connect() as conn:
             newsletter = conn.execute(select(_newsletters).where(_newsletters.c.slug == newsletter_slug)).one_or_none()
             if newsletter is None:
-                return []
-            rows = conn.execute(select(_subscribers).where(_subscribers.c.newsletter_id == newsletter.id)).fetchall()
-        return [_row_to_subscriber(r) for r in rows]
+                return Page([], None)
+            newsletter_id = newsletter.id
+        self.purge_expired_pending(newsletter_id)
+        page_size = clamp_limit(limit)
+        query = select(_subscribers).where(_subscribers.c.newsletter_id == newsletter_id)
+        if before:
+            parts = decode_cursor(before)
+            try:
+                if len(parts) != 3 or parts[0] != "s":
+                    raise InvalidCursor("invalid cursor")
+                created_at = datetime.fromisoformat(parts[1])
+                sub_id = int(parts[2])
+            except InvalidCursor:
+                raise
+            except (TypeError, ValueError) as exc:
+                raise InvalidCursor("invalid cursor") from exc
+            query = query.where(
+                or_(
+                    _subscribers.c.created_at < created_at,
+                    and_(_subscribers.c.created_at == created_at, _subscribers.c.id < sub_id),
+                )
+            )
+        query = query.order_by(_subscribers.c.created_at.desc(), _subscribers.c.id.desc()).limit(page_size + 1)
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).fetchall()
+        items = [_row_to_subscriber(r) for r in rows[:page_size]]
+        if len(rows) <= page_size:
+            return Page(items, None)
+        last = items[-1]
+        created = last.created_at or _utc_now()
+        return Page(items, encode_cursor("s", created.isoformat(), str(last.id)))
+
+    def purge_expired_pending(self, newsletter_id: int) -> int:
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                delete(_subscribers).where(
+                    (_subscribers.c.newsletter_id == newsletter_id)
+                    & (_subscribers.c.confirmed_at.is_(None))
+                    & (_subscribers.c.created_at < _cutoff_naive())
+                )
+            )
+        return result.rowcount or 0
 
     def unsubscribe(self, token: str) -> None:
         with self._engine.begin() as conn:
@@ -375,6 +537,7 @@ class SQLAlchemyRepository:
     # --- Subscriber lookup ---
 
     def get_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
+        self.purge_expired_pending(newsletter_id)
         with self._engine.connect() as conn:
             row = conn.execute(
                 select(_subscribers).where(

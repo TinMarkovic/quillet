@@ -1,35 +1,90 @@
 {% extends "quillet/base.html" %}
 
+{% block canonical %}{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug, _external=True) }}{% endblock %}
+{% block description %}{% if description_html %}{{ description_html | striptags | truncate(160, killwords=False, end='') | trim }}{% endif %}{% endblock %}
+
+{% block head %}
+<link rel="alternate" type="text/markdown" href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">
+<link rel="alternate" type="application/json" href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">
+{% endblock %}
+
+{% block jsonld %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"CollectionPage","name":{{ newsletter.name | tojson }},"url":{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug, _external=True) | tojson }}}
+</script>
+{% endblock %}
+
 {% block content %}
 <h1>{{ newsletter.name }}</h1>
 
+{% if description_html %}
+  <div class="prose">{{ description_html | safe }}</div>
+{% endif %}
+
+{% if subscribe_position == 'start' %}
+  <h2>Subscribe</h2>
+  {% include "quillet/_subscribe_form.html" %}
+  <hr>
+{% endif %}
+
 {% if posts %}
-  <ul style="list-style:none;padding:0;">
-    {% for post in posts %}
-    <li style="margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:1px solid #eee;">
-      <a href="{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
-        <strong>{{ post.title }}</strong>
-      </a>
-      {% if post.published_at %}
-        <span class="muted"> — {{ post.published_at.strftime('%b %d, %Y') }}</span>
-      {% endif %}
-    </li>
-    {% endfor %}
+  <ul id="post-list" style="list-style:none;padding:0;">
+    {% include "quillet/_post_list_items.html" %}
   </ul>
+  {% if next_cursor %}
+    <p id="load-more-wrap">
+      <a id="load-more" rel="next"
+         href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug, cursor=next_cursor) }}">Load more</a>
+    </p>
+    <script>
+    (function () {
+      var list = document.getElementById('post-list');
+      var wrap = document.getElementById('load-more-wrap');
+      var link = document.getElementById('load-more');
+      if (!list || !link) return;
+      var loading = false;
+      function load() {
+        if (loading || !link) return;
+        loading = true;
+        var url = new URL(link.href, window.location.origin);
+        url.searchParams.set('partial', '1');
+        fetch(url).then(function (r) { return r.text(); }).then(function (html) {
+          list.insertAdjacentHTML('beforeend', html);
+          var marker = list.querySelector('[data-next-cursor]');
+          if (marker) {
+            var u = new URL(link.href, window.location.origin);
+            u.searchParams.set('cursor', marker.getAttribute('data-next-cursor'));
+            link.href = u.pathname + u.search;
+            marker.remove();
+            loading = false;
+          } else if (wrap) {
+            wrap.remove();
+            link = null;
+          }
+        });
+      }
+      if ('IntersectionObserver' in window) {
+        var obs = new IntersectionObserver(function (entries) {
+          if (entries[0].isIntersecting) load();
+        });
+        obs.observe(link);
+      }
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        load();
+      });
+    })();
+    </script>
+  {% endif %}
 {% else %}
   <p class="muted">No posts yet.</p>
 {% endif %}
 
+{% if subscribe_position != 'start' %}
 <hr>
 <h2>Subscribe</h2>
-{% if subscribe_error %}
-  <p style="color:#cc0000;">{{ subscribe_error }}</p>
+{% include "quillet/_subscribe_form.html" %}
 {% endif %}
-<form class="subscribe-form" method="post"
-      action="{{ url_for('quillet.subscribe', newsletter_slug=newsletter.slug) }}">
-  <input type="email" name="email" placeholder="your@email.com" required>
-  <button type="submit">Subscribe</button>
-</form>
 <p class="muted" style="margin-top:0.75rem;font-size:0.85em;">
   <a href="{{ url_for('quillet.feed', newsletter_slug=newsletter.slug) }}">RSS feed</a>
 </p>

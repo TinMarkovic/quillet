@@ -171,6 +171,10 @@ def create_app() -> Flask:
     app.register_blueprint(bp)
     app.cli.add_command(quillet_cli)
 
+    from .robots import register_robots
+
+    register_robots(app, db, base_url=base_url)
+
     return app
 
 

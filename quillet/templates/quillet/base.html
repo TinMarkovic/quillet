@@ -18,6 +18,10 @@
   <link rel="canonical" href="{{ _canonical | trim }}">
   <meta property="og:url" content="{{ _canonical | trim }}">
   {%- endif %}
+  {% if newsletter is defined %}
+  <link rel="alternate" type="application/rss+xml" href="{{ url_for('quillet.feed', newsletter_slug=newsletter.slug) }}">
+  <link rel="sitemap" type="application/xml" href="{{ url_for('quillet.sitemap', newsletter_slug=newsletter.slug) }}">
+  {% endif %}
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; max-width: 680px; margin: 2rem auto; padding: 0 1rem; color: #111; line-height: 1.6; }
@@ -37,6 +41,7 @@
     .btn-secondary { background: #555; }
   </style>
   {% block head %}{% endblock %}
+  {% block jsonld %}{% endblock %}
 </head>
 <body>
   <nav>

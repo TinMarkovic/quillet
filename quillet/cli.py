@@ -118,7 +118,14 @@ def list_subscribers(newsletter_slug: str) -> None:
     if newsletter is None:
         raise click.ClickException(f"Newsletter not found: {newsletter_slug}")
 
-    subscribers = db.list_all_subscribers(newsletter_slug)
+    subscribers = []
+    cursor = None
+    while True:
+        page = db.list_all_subscribers(newsletter_slug, limit=100, before=cursor)
+        subscribers.extend(page.items)
+        if not page.next_cursor:
+            break
+        cursor = page.next_cursor
     if not subscribers:
         click.echo("No subscribers.")
         return

@@ -11,8 +11,8 @@ from flask import (
 )
 
 from .auth import require_basic_auth
-from .models import NewsletterConfig
-from .routes import _db, _email, _post_list_url, _post_url, _send_test_email, _unsubscribe_url_template
+from .models import InvalidCursor, NewsletterConfig
+from .routes import _db, _email, _list_args, _post_list_url, _post_url, _send_test_email, _unsubscribe_url_template
 
 
 def _slugify(text: str) -> str:
@@ -31,15 +31,24 @@ def register_admin_routes(bp: Blueprint) -> None:
         if newsletter is None:
             abort(404)
 
-        posts = _db().list_posts(newsletter_slug, published_only=False)
-        subscribers = _db().list_all_subscribers(newsletter_slug)
-        confirmed_count = sum(1 for s in subscribers if s.confirmed_at is not None)
+        limit, cursor, partial = _list_args()
+        try:
+            page = _db().list_posts(
+                newsletter_slug,
+                published_only=False,
+                limit=limit,
+                before=cursor,
+            )
+        except InvalidCursor:
+            abort(400)
+        posts = page.items
+        confirmed_count = len(_db().list_confirmed_subscribers(newsletter_slug))
 
         return render_template(
-            "quillet/admin/dashboard.html",
+            "quillet/admin/_dashboard_rows.html" if partial else "quillet/admin/dashboard.html",
             newsletter=newsletter,
             posts=posts,
-            subscriber_count=len(subscribers),
+            next_cursor=page.next_cursor,
             confirmed_count=confirmed_count,
         )
 
@@ -214,11 +223,18 @@ def register_admin_routes(bp: Blueprint) -> None:
         if newsletter is None:
             abort(404)
 
-        subscribers = _db().list_all_subscribers(newsletter_slug)
+        limit, cursor, partial = _list_args()
+        try:
+            page = _db().list_all_subscribers(newsletter_slug, limit=limit, before=cursor)
+        except InvalidCursor:
+            abort(400)
+        confirmed_count = len(_db().list_confirmed_subscribers(newsletter_slug))
         return render_template(
-            "quillet/admin/subscribers.html",
+            "quillet/admin/_subscriber_rows.html" if partial else "quillet/admin/subscribers.html",
             newsletter=newsletter,
-            subscribers=subscribers,
+            subscribers=page.items,
+            next_cursor=page.next_cursor,
+            confirmed_count=confirmed_count,
         )
 
     @bp.post("/<newsletter_slug>/admin/subscribers/<int:subscriber_id>/delete")
@@ -278,12 +294,18 @@ def register_admin_routes(bp: Blueprint) -> None:
 
         newsletter = _db().update_newsletter(newsletter.id, name_val, from_name, from_email, reply_to)
 
+        position = request.form.get("subscribe_position", "end").strip()
+        if position not in ("start", "end"):
+            position = "end"
+
         config = NewsletterConfig(
             newsletter_id=newsletter.id,
             subject_prefix=request.form.get("subject_prefix", "").strip() or None,
             email_opener=request.form.get("email_opener", "").strip() or None,
             email_footer=request.form.get("email_footer", "").strip() or None,
             post_header_template=request.form.get("post_header_template", "").strip() or None,
+            subscribe_position=position,
+            public_description=request.form.get("public_description", "").strip() or None,
         )
         _db().save_newsletter_config(config)
 

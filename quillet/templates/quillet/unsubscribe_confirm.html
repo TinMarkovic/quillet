@@ -1,0 +1,27 @@
+{% extends "quillet/base.html" %}
+
+{% block title %}
+  {% if state == 'confirm' %}Unsubscribe?
+  {% elif state == 'unsubscribed' %}Unsubscribed
+  {% else %}Invalid link
+  {% endif %} — {{ newsletter.name }}
+{% endblock %}
+
+{% block content %}
+  {% if state == 'confirm' %}
+    <h1>Unsubscribe?</h1>
+    <p>Stop emails from <strong>{{ newsletter.name }}</strong>?</p>
+    <form method="post" action="{{ url_for('quillet.unsubscribe_submit', newsletter_slug=newsletter.slug, token=token) }}">
+      <button class="btn btn-danger" type="submit">Yes, unsubscribe</button>
+      <a class="btn btn-secondary" href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">Cancel</a>
+    </form>
+
+  {% elif state == 'unsubscribed' %}
+    <h1>Unsubscribed</h1>
+    <p>You've been removed from <strong>{{ newsletter.name }}</strong>. You won't receive any more emails.</p>
+
+  {% else %}
+    <h1>Invalid link</h1>
+    <p>This unsubscribe link is invalid.</p>
+  {% endif %}
+{% endblock %}

@@ -21,7 +21,7 @@ from . import api_ops
 from .auth import require_basic_auth
 from .db import NewsletterRepository
 from .email import EmailSender
-from .models import Newsletter, Post, Subscriber
+from .models import PAGE_MAX, PAGE_SIZE, RSS_LIMIT, InvalidCursor, Newsletter, Post, Subscriber, clamp_limit
 
 # ---------------------------------------------------------------------------
 # Helpers (used by admin.py too)
@@ -45,7 +45,48 @@ def _is_api_mode() -> bool:
 
 
 def _wants_json() -> bool:
-    return _is_api_mode() or request.accept_mimetypes.best == "application/json"
+    return _response_format() == "json"
+
+
+def _response_format() -> str:
+    if _is_api_mode():
+        return "json"
+    best = request.accept_mimetypes.best_match(
+        ["text/html", "application/json", "text/markdown", "text/plain"],
+        default="text/html",
+    )
+    if best in ("text/markdown", "text/plain"):
+        return "markdown"
+    if best == "application/json":
+        return "json"
+    return "html"
+
+
+def _list_args() -> tuple[int, str | None, bool]:
+    raw_limit = request.args.get("limit")
+    try:
+        limit = clamp_limit(int(raw_limit)) if raw_limit else PAGE_SIZE
+    except ValueError:
+        abort(400)
+    cursor = request.args.get("cursor") or None
+    partial = request.args.get("partial") == "1"
+    return limit, cursor, partial
+
+
+def _iter_published_posts(newsletter_slug: str) -> list[Post]:
+    items: list[Post] = []
+    cursor = None
+    while True:
+        page = _db().list_posts(newsletter_slug, published_only=True, limit=PAGE_MAX, before=cursor)
+        items.extend(page.items)
+        if not page.next_cursor:
+            return items
+        cursor = page.next_cursor
+
+
+def _vary(response: Response) -> Response:
+    response.headers["Vary"] = "Accept"
+    return response
 
 
 @lru_cache(maxsize=256)
@@ -58,7 +99,7 @@ def _render_post_html(body_md: str) -> str:
 
 def _unsubscribe_url_template(bp_name: str, newsletter_slug: str) -> str:
     base = _base_url()
-    path = url_for(f"{bp_name}.unsubscribe", newsletter_slug=newsletter_slug, token="TOKEN_PLACEHOLDER")
+    path = url_for(f"{bp_name}.unsubscribe_form", newsletter_slug=newsletter_slug, token="TOKEN_PLACEHOLDER")
     return urljoin(base, path).replace("TOKEN_PLACEHOLDER", "{token}")
 
 
@@ -93,6 +134,7 @@ def _send_test_email(
         email=test_email,
         token="test",
         confirmed_at=None,
+        created_at=None,
     )
     config = _db().get_newsletter_config(newsletter.id)
     prefix = f"[TEST] {config.subject_prefix or ''}".strip()
@@ -122,24 +164,102 @@ def register_public_routes(bp: Blueprint) -> None:
         if newsletter is None:
             abort(404)
 
-        posts = _db().list_posts(newsletter_slug, published_only=True)
+        config = _db().get_newsletter_config(newsletter.id)
+        limit, cursor, partial = _list_args()
+        try:
+            page = _db().list_posts(newsletter_slug, published_only=True, limit=limit, before=cursor)
+        except InvalidCursor:
+            abort(400)
+        posts = page.items
+        fmt = _response_format()
 
-        if _wants_json():
+        if fmt == "json":
             response = jsonify(
                 newsletter=newsletter._asdict(),
                 posts=[p._asdict() for p in posts],
+                next_cursor=page.next_cursor,
             )
             response.headers["Cache-Control"] = "public, max-age=300"
-            return response
+            return _vary(response)
+
+        if fmt == "markdown":
+            lines = [f"# {newsletter.name}", ""]
+            for post in posts:
+                date = post.published_at.strftime("%Y-%m-%d") if post.published_at else ""
+                url = _post_url(name, newsletter_slug, post.slug)
+                lines.append(f"- [{post.title}]({url}) — {date}".rstrip(" —"))
+            if page.next_cursor:
+                lines.append("")
+                lines.append(f"next_cursor: {page.next_cursor}")
+            response = Response("\n".join(lines) + "\n", mimetype="text/markdown; charset=utf-8")
+            response.headers["Cache-Control"] = "public, max-age=300"
+            return _vary(response)
+
+        description_html = ""
+        if config.public_description:
+            description_html = _render_post_html(config.public_description)
+
+        if partial:
+            return render_template(
+                "quillet/_post_list_items.html",
+                newsletter=newsletter,
+                posts=posts,
+                next_cursor=page.next_cursor,
+            )
 
         response = make_response(
             render_template(
                 "quillet/post_list.html",
                 newsletter=newsletter,
                 posts=posts,
+                next_cursor=page.next_cursor,
+                partial=False,
+                subscribe_position=config.subscribe_position or "end",
+                description_html=description_html,
             )
         )
         response.headers["Cache-Control"] = "public, max-age=300"
+        return _vary(response)
+
+    @bp.get("/<newsletter_slug>/sitemap.xml")
+    def sitemap(newsletter_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        posts = _iter_published_posts(newsletter_slug)
+        base = _base_url()
+        urls = [urljoin(base, url_for(f"{name}.post_list", newsletter_slug=newsletter_slug))]
+        urls.extend(
+            urljoin(base, url_for(f"{name}.post_detail", newsletter_slug=newsletter_slug, post_slug=post.slug))
+            for post in posts
+        )
+        xml_urls = "".join(f"  <url><loc>{url}</loc></url>\n" for url in urls)
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f"{xml_urls}</urlset>\n"
+        )
+        response = current_app.response_class(xml, mimetype="application/xml")
+        response.headers["Cache-Control"] = "public, max-age=600"
+        return response
+
+    @bp.get("/<newsletter_slug>/llms.txt")
+    def llms_txt(newsletter_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        posts = _iter_published_posts(newsletter_slug)
+        lines = [f"# {newsletter.name}", ""]
+        if newsletter:
+            lines.append(f"> {newsletter.name}")
+            lines.append("")
+        for post in posts:
+            url = _post_url(name, newsletter_slug, post.slug)
+            lines.append(f"- [{post.title}]({url}) (text/markdown)")
+        response = Response("\n".join(lines) + "\n", mimetype="text/plain; charset=utf-8")
+        response.headers["Cache-Control"] = "public, max-age=600"
         return response
 
     @bp.get("/<newsletter_slug>/posts/<post_slug>")
@@ -152,10 +272,17 @@ def register_public_routes(bp: Blueprint) -> None:
         if post is None or post.published_at is None:
             abort(404)
 
-        if _wants_json():
+        fmt = _response_format()
+        if fmt == "json":
             response = jsonify(newsletter=newsletter._asdict(), post=post._asdict())
             response.headers["Cache-Control"] = "public, max-age=600"
-            return response
+            return _vary(response)
+
+        if fmt == "markdown":
+            body = f"# {post.title}\n\n{post.body_md}\n"
+            response = Response(body, mimetype="text/markdown; charset=utf-8")
+            response.headers["Cache-Control"] = "public, max-age=600"
+            return _vary(response)
 
         response = make_response(
             render_template(
@@ -166,7 +293,7 @@ def register_public_routes(bp: Blueprint) -> None:
             )
         )
         response.headers["Cache-Control"] = "public, max-age=600"
-        return response
+        return _vary(response)
 
     @bp.post("/<newsletter_slug>/subscribe")
     def subscribe(newsletter_slug: str):
@@ -182,12 +309,18 @@ def register_public_routes(bp: Blueprint) -> None:
         if not email:
             if _wants_json():
                 return jsonify(error="Email is required."), 400
+            config = _db().get_newsletter_config(newsletter.id)
+            description_html = _render_post_html(config.public_description) if config.public_description else ""
+            page = _db().list_posts(newsletter_slug, published_only=True)
             return (
                 render_template(
                     "quillet/post_list.html",
                     newsletter=newsletter,
-                    posts=_db().list_posts(newsletter_slug),
+                    posts=page.items,
+                    next_cursor=page.next_cursor,
                     subscribe_error="Email is required.",
+                    subscribe_position=config.subscribe_position or "end",
+                    description_html=description_html,
                 ),
                 400,
             )
@@ -252,25 +385,61 @@ def register_public_routes(bp: Blueprint) -> None:
         )
 
     @bp.get("/<newsletter_slug>/unsubscribe/<token>")
-    def unsubscribe(newsletter_slug: str, token: str):
+    def unsubscribe_form(newsletter_slug: str, token: str):
         newsletter = _db().get_newsletter(newsletter_slug)
         if newsletter is None:
             abort(404)
 
-        _db().unsubscribe(token)
+        if _wants_json():
+            response = jsonify(error="POST required to unsubscribe.")
+            return response, 405, {"Allow": "POST"}
 
-        _db().log_event(
-            "unsubscribe",
-            json.dumps({"newsletter_slug": newsletter_slug}),
-            newsletter_id=newsletter.id,
+        subscriber = _db().get_subscriber_by_token(token)
+        if subscriber is None:
+            state = "invalid"
+        elif subscriber.unsubscribed:
+            state = "unsubscribed"
+        else:
+            state = "confirm"
+        return render_template(
+            "quillet/unsubscribe_confirm.html",
+            newsletter=newsletter,
+            token=token,
+            state=state,
         )
+
+    @bp.post("/<newsletter_slug>/unsubscribe/<token>")
+    def unsubscribe_submit(newsletter_slug: str, token: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        subscriber = _db().get_subscriber_by_token(token)
+        if subscriber is None:
+            if _wants_json():
+                return jsonify(error="Invalid token."), 404
+            return render_template(
+                "quillet/unsubscribe_confirm.html",
+                newsletter=newsletter,
+                token=token,
+                state="invalid",
+            )
+
+        if not subscriber.unsubscribed:
+            _db().unsubscribe(token)
+            _db().log_event(
+                "unsubscribe",
+                json.dumps({"newsletter_slug": newsletter_slug}),
+                newsletter_id=newsletter.id,
+            )
 
         if _wants_json():
             return jsonify(ok=True)
 
         return render_template(
-            "quillet/subscribe_confirm.html",
+            "quillet/unsubscribe_confirm.html",
             newsletter=newsletter,
+            token=token,
             state="unsubscribed",
         )
 
@@ -280,7 +449,8 @@ def register_public_routes(bp: Blueprint) -> None:
         if newsletter is None:
             abort(404)
 
-        posts = _db().list_posts(newsletter_slug, published_only=True)
+        page = _db().list_posts(newsletter_slug, published_only=True, limit=RSS_LIMIT)
+        posts = page.items
         base = _base_url()
 
         items = [
@@ -333,7 +503,13 @@ def register_public_routes(bp: Blueprint) -> None:
     @bp.get("/<newsletter_slug>/api/posts")
     @require_basic_auth
     def api_list_posts(newsletter_slug: str):
-        payload, status = api_ops.list_posts(_db(), newsletter_slug, status=request.args.get("status") or "all")
+        payload, status = api_ops.list_posts(
+            _db(),
+            newsletter_slug,
+            status=request.args.get("status") or "all",
+            cursor=request.args.get("cursor"),
+            limit=request.args.get("limit"),
+        )
         return jsonify(payload), status
 
     @bp.get("/<newsletter_slug>/api/posts/<post_slug>")
@@ -400,7 +576,12 @@ def register_public_routes(bp: Blueprint) -> None:
     @bp.get("/<newsletter_slug>/api/subscribers")
     @require_basic_auth
     def api_list_subscribers(newsletter_slug: str):
-        payload, status = api_ops.list_subscribers(_db(), newsletter_slug)
+        payload, status = api_ops.list_subscribers(
+            _db(),
+            newsletter_slug,
+            cursor=request.args.get("cursor"),
+            limit=request.args.get("limit"),
+        )
         return jsonify(payload), status
 
     @bp.delete("/<newsletter_slug>/api/posts/<post_slug>")

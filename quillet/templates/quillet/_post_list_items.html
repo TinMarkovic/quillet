@@ -1,0 +1,13 @@
+{% for post in posts %}
+<li style="margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:1px solid #eee;">
+  <a href="{{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug) }}">
+    <strong>{{ post.title }}</strong>
+  </a>
+  {% if post.published_at %}
+    <span class="muted"> — {{ post.published_at.strftime('%b %d, %Y') }}</span>
+  {% endif %}
+</li>
+{% endfor %}
+{% if next_cursor %}
+<li hidden data-next-cursor="{{ next_cursor }}"></li>
+{% endif %}

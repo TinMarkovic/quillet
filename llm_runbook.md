@@ -27,7 +27,8 @@ repo) or installable via pip.
 quillet/
 ├── __init__.py           → exposes create_blueprint, create_app, create_asgi_app
 ├── factory.py            → wires everything together (create_asgi_app = REST + MCP)
-├── models.py             → Newsletter, Post, Subscriber (NamedTuples)
+├── robots.py             → robots_txt() / register_robots() for site-root /robots.txt
+├── models.py             → Newsletter, Post, Subscriber, Page (NamedTuples)
 ├── routes.py             → public + JSON API route handlers
 ├── api_ops.py            → in-process admin ops shared by JSON API and MCP
 ├── mcp_server.py         → Streamable HTTP MCP (optional extra)
@@ -50,6 +51,7 @@ quillet/
     ├── post_list.html
     ├── post_detail.html
     ├── subscribe_confirm.html
+    ├── unsubscribe_confirm.html
     └── admin/
         ├── dashboard.html
         ├── post_form.html
@@ -86,6 +88,8 @@ class Subscriber(NamedTuple):
     email: str
     token: str          # Used in confirm + unsubscribe URLs
     confirmed_at: datetime | None   # None = pending confirmation
+    unsubscribed: bool = False
+    created_at: datetime | None = None
 ```
 
 ---
@@ -107,18 +111,22 @@ pip install "quillet[supabase]"
 Add this to wherever you create your Flask app (e.g. `main.py`, `app.py`, `__init__.py`):
 
 ```python
-from quillet import create_blueprint
+from quillet import create_blueprint, register_robots, robots_txt
 from quillet.db.sqlalchemy import SQLAlchemyRepository
 from quillet.email.mailgun import MailgunSender
 
+db = SQLAlchemyRepository("sqlite:///newsletter.db")
 app.register_blueprint(
     create_blueprint(
-        db=SQLAlchemyRepository("sqlite:///newsletter.db"),
+        db=db,
         email=MailgunSender(api_key=os.environ["MAILGUN_API_KEY"], domain=os.environ["MAILGUN_DOMAIN"]),
         admin_password=os.environ["QUILLET_ADMIN_PASSWORD"],
     ),
     url_prefix="/newsletter",
 )
+# Do not auto-register /robots.txt from the blueprint — the host may already own it.
+register_robots(app, db, url_prefix="/newsletter", base_url="https://example.com")
+# Or splice: return extra + robots_txt(db, url_prefix="/newsletter", base_url="https://example.com")
 ```
 
 The `url_prefix` is arbitrary — you choose where routes live. With `/newsletter`:
@@ -210,12 +218,13 @@ Replace `<slug>` with your newsletter slug (e.g. `blog`).
 ```
 GET  /<slug>/
      Returns post archive.
-     HTML by default; JSON if Accept: application/json header is present.
-     Response: { newsletter: {...}, posts: [...] }
+     HTML by default; JSON if Accept: application/json; markdown if Accept: text/markdown.
+     Query: cursor (opaque), limit (default 20, max 100), partial=1 (HTML fragment).
+     Response: { newsletter: {...}, posts: [...], next_cursor: ... }
 
 GET  /<slug>/posts/<post_slug>
      Returns single post. Only works for published posts (published_at not null).
-     HTML by default; JSON if Accept: application/json.
+     HTML by default; JSON if Accept: application/json; markdown if Accept: text/markdown.
      Response: { newsletter: {...}, post: {...} }
 
 POST /<slug>/subscribe
@@ -225,11 +234,24 @@ POST /<slug>/subscribe
 
 GET  /<slug>/confirm/<token>
      Confirm subscription. Token comes from the confirmation email.
+     Pending unconfirmed rows expire after 3 days (hard-deleted).
      Response: HTML state page OR {"ok": true} / {"error": "..."} (404)
 
 GET  /<slug>/unsubscribe/<token>
+     Confirm form. Does not unsubscribe. JSON GET → 405 Allow: POST.
+
+POST /<slug>/unsubscribe/<token>
      Unsubscribe. Token is embedded in every sent email.
      Response: HTML state page OR {"ok": true}
+
+GET  /<slug>/feed.xml
+     RSS 2.0 of the latest 50 published posts. No cursor.
+
+GET  /<slug>/sitemap.xml
+     URL index of the archive and all published posts.
+
+GET  /<slug>/llms.txt
+     LLM discovery index of published posts.
 ```
 
 ### JSON API (Basic Auth: username=admin, password=QUILLET_ADMIN_PASSWORD)
@@ -250,8 +272,9 @@ MCP  /<slug>/mcp/   (ASGI / uvicorn only)
      Tools run in-process against the same DB and email backends as REST.
 
 GET  /<slug>/api/posts
-     List posts including drafts. Optional query: status=all|draft|published|unsent|sent.
-     Response: {"posts": [{id, newsletter_id, slug, title, body_md, published_at, sent_at}, ...]}
+     List posts including drafts. Optional query: status=all|draft|published|unsent|sent,
+     cursor, limit (default 20, max 100).
+     Response: {"posts": [{id, newsletter_id, slug, title, body_md, published_at, sent_at}, ...], "next_cursor": ...}
 
 GET  /<slug>/api/posts/<post_slug>
      Fetch a single post by slug, including drafts.
@@ -282,8 +305,9 @@ POST /<slug>/api/posts/<post_slug>/send
      Response: {"ok": true, "recipients": N} (200)
 
 GET  /<slug>/api/subscribers
-     List all non-unsubscribed subscribers (confirmed and pending).
-     Response: {"subscribers": [{id, newsletter_id, email, token, confirmed_at}, ...]}
+     List subscribers (confirmed and pending), a page at a time.
+     Query: cursor, limit (default 20, max 100).
+     Response: {"subscribers": [{id, newsletter_id, email, token, confirmed_at, created_at}, ...], "next_cursor": ...}
 ```
 
 ### Admin UI (Basic Auth, web mode only)
@@ -371,9 +395,19 @@ class MyRepository:
     def create_newsletter(self, slug: str, name: str, from_email: str, from_name: str, reply_to: str | None) -> Newsletter: ...
     def get_newsletter(self, slug: str) -> Newsletter | None: ...
 
-    def list_posts(self, newsletter_slug: str, published_only: bool = True) -> list[Post]: ...
-    # published_only=True: only return posts where published_at is not None
-    # order: most recently published first
+    def list_newsletter_slugs(self) -> list[str]: ...
+
+    def list_posts(
+        self,
+        newsletter_slug: str,
+        published_only: bool = True,
+        *,
+        limit: int = 20,
+        before: str | None = None,
+        status: str | None = None,
+    ) -> Page: ...
+    # Keyset page, newest first. Opaque `before` cursor. published_only uses (published_at, id);
+    # all-status (admin) uses (id). Default page 20, max 100.
 
     def get_post(self, newsletter_slug: str, post_slug: str) -> Post | None: ...
     def create_post(self, newsletter_slug: str, title: str, slug: str, body_md: str) -> Post: ...
@@ -386,16 +420,24 @@ class MyRepository:
 
     def add_subscriber(self, newsletter_slug: str, email: str, token: str) -> Subscriber: ...
     # token is a pre-generated secrets.token_urlsafe(32) string.
-    # confirmed_at should be None initially.
+    # confirmed_at should be None initially. Set created_at. Call purge_expired_pending first.
 
     def confirm_subscriber(self, token: str) -> Subscriber | None: ...
-    # Sets confirmed_at. Returns None if token not found.
+    # Sets confirmed_at. Returns None if token not found or pending row is older than 3 days
+    # (delete the expired row).
+
+    def get_subscriber_by_token(self, token: str) -> Subscriber | None: ...
 
     def list_confirmed_subscribers(self, newsletter_slug: str) -> list[Subscriber]: ...
-    # Only confirmed (confirmed_at not None) and not unsubscribed.
+    # Full set. Only confirmed (confirmed_at not None) and not unsubscribed. Used by send.
 
-    def list_all_subscribers(self, newsletter_slug: str) -> list[Subscriber]: ...
-    # All non-unsubscribed subscribers (confirmed and pending).
+    def list_all_subscribers(
+        self, newsletter_slug: str, *, limit: int = 20, before: str | None = None
+    ) -> Page: ...
+    # Keyset page on (created_at, id). Call purge_expired_pending first.
+
+    def purge_expired_pending(self, newsletter_id: int) -> int: ...
+    # Hard-delete pending (confirmed_at is None) older than 3 days.
 
     def unsubscribe(self, token: str) -> None: ...
     # Mark as unsubscribed. Should not raise if token not found.
@@ -444,7 +486,10 @@ your_app/templates/quillet/base.html           ← overrides base layout
 
 `post_list.html`:
 - `newsletter` — `Newsletter` NamedTuple
-- `posts` — list of `Post` NamedTuples (published only)
+- `posts` — current page of published `Post` NamedTuples
+- `next_cursor` — opaque string or None
+- `subscribe_position` — `"start"` or `"end"`
+- `description_html` — rendered archive description or `""`
 - `subscribe_error` — string or None (set when subscribe form submission fails)
 
 `post_detail.html`:
@@ -456,10 +501,15 @@ your_app/templates/quillet/base.html           ← overrides base layout
 - `newsletter` — `Newsletter`
 - `state` — one of: `"pending"`, `"confirmed"`, `"unsubscribed"`, `"invalid"`
 
+`unsubscribe_confirm.html`:
+- `newsletter` — `Newsletter`
+- `token` — str
+- `state` — one of: `"confirm"`, `"unsubscribed"`, `"invalid"`
+
 `admin/dashboard.html`:
 - `newsletter` — `Newsletter`
-- `posts` — list of all `Post` NamedTuples (including drafts)
-- `subscriber_count` — int (total non-unsubscribed)
+- `posts` — current page of `Post` NamedTuples (including drafts)
+- `next_cursor` — opaque string or None
 - `confirmed_count` — int (confirmed only)
 
 `admin/post_form.html`:
@@ -469,7 +519,9 @@ your_app/templates/quillet/base.html           ← overrides base layout
 
 `admin/subscribers.html`:
 - `newsletter` — `Newsletter`
-- `subscribers` — list of all `Subscriber` NamedTuples (non-unsubscribed)
+- `subscribers` — current page of `Subscriber` NamedTuples
+- `next_cursor` — opaque string or None
+- `confirmed_count` — int
 
 ### url_for in templates
 
@@ -481,7 +533,8 @@ If you changed the `name` parameter in `create_blueprint`, use that name instead
 {{ url_for('quillet.post_detail', newsletter_slug=newsletter.slug, post_slug=post.slug) }}
 {{ url_for('quillet.subscribe', newsletter_slug=newsletter.slug) }}
 {{ url_for('quillet.confirm_subscription', newsletter_slug=newsletter.slug, token=token) }}
-{{ url_for('quillet.unsubscribe', newsletter_slug=newsletter.slug, token=token) }}
+{{ url_for('quillet.unsubscribe_form', newsletter_slug=newsletter.slug, token=token) }}
+{{ url_for('quillet.unsubscribe_submit', newsletter_slug=newsletter.slug, token=token) }}
 {{ url_for('quillet.dashboard', newsletter_slug=newsletter.slug) }}
 {{ url_for('quillet.new_post', newsletter_slug=newsletter.slug) }}
 {{ url_for('quillet.edit_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}

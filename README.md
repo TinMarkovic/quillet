@@ -38,6 +38,17 @@ app.register_blueprint(
     ),
     url_prefix="/newsletter",
 )
+
+# Site-root /robots.txt is not mounted by the blueprint (the host may already
+# own that path). Generate it from the live slug list:
+from quillet import robots_txt, register_robots
+
+register_robots(app, db, url_prefix="/newsletter", base_url="https://example.com")
+# Or splice into an existing view:
+# @app.get("/robots.txt")
+# def robots():
+#     extra = "User-agent: *\nAllow: /\n"
+#     return extra + robots_txt(db, url_prefix="/newsletter", base_url="https://example.com")
 ```
 
 All routes are now available at `/newsletter/<newsletter_slug>/`. Visit `http://localhost:5000/newsletter/blog/`.
@@ -122,12 +133,15 @@ All routes are prefixed with `/<newsletter_slug>/`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/<slug>/` | Post archive. Returns HTML or JSON (`Accept: application/json`). |
-| `GET` | `/<slug>/posts/<post_slug>` | Single post. Returns HTML or JSON. |
+| `GET` | `/<slug>/` | Post archive. HTML, JSON (`Accept: application/json`), or markdown. `?cursor=` + `?limit=` (default 20, max 100). |
+| `GET` | `/<slug>/posts/<post_slug>` | Single post. HTML, JSON, or markdown (`Accept: text/markdown`). |
 | `POST` | `/<slug>/subscribe` | Subscribe. Accepts form `email` or JSON `{"email": "..."}`. Sends double opt-in email. |
-| `GET` | `/<slug>/confirm/<token>` | Confirm subscription via emailed link. |
-| `GET` | `/<slug>/unsubscribe/<token>` | Unsubscribe via emailed link. |
-| `GET` | `/<slug>/feed.xml` | RSS 2.0 feed of published posts. |
+| `GET` | `/<slug>/confirm/<token>` | Confirm subscription via emailed link. Pending confirms expire after 3 days. |
+| `GET` | `/<slug>/unsubscribe/<token>` | Confirm form (no write). JSON GET → 405. |
+| `POST` | `/<slug>/unsubscribe/<token>` | Unsubscribe. |
+| `GET` | `/<slug>/feed.xml` | RSS 2.0 of the latest 50 published posts. |
+| `GET` | `/<slug>/sitemap.xml` | URL index of the archive and all published posts. |
+| `GET` | `/<slug>/llms.txt` | LLM discovery index of published posts (markdown). |
 
 ### Admin browser UI (Basic Auth)
 
@@ -148,7 +162,7 @@ All routes are prefixed with `/<newsletter_slug>/`.
 |---|---|---|
 | `GET` | `/<slug>/api/openapi.yaml` | OpenAPI 3 spec (public, no auth) |
 | `GET` | `/<slug>/api/mcp.md` | MCP bootstrap for agents (public, no auth) |
-| `GET` | `/<slug>/api/posts` | `?status=all\|draft\|published\|unsent\|sent` → `{"posts": [...]}` |
+| `GET` | `/<slug>/api/posts` | `?status=all\|draft\|published\|unsent\|sent` `&cursor=` `&limit=` → `{"posts": [...], "next_cursor": ...}` |
 | `GET` | `/<slug>/api/posts/<post_slug>` | → `{"post": {...}}` (drafts included) |
 | `POST` | `/<slug>/api/posts` | `{"title", "slug", "body_md"}` → `{"post": {...}}` |
 | `PUT` | `/<slug>/api/posts/<post_slug>` | `{"title", "body_md", "slug?"}` → `{"post": {...}}` |
@@ -156,7 +170,7 @@ All routes are prefixed with `/<newsletter_slug>/`.
 | `POST` | `/<slug>/api/posts/<post_slug>/send-test` | `{"email"}` → `{"ok": true}` (does not set `sent_at`) |
 | `POST` | `/<slug>/api/posts/<post_slug>/send` | → `{"ok": true, "recipients": N}` |
 | `DELETE` | `/<slug>/api/posts/<post_slug>` | → `{"ok": true}` |
-| `GET` | `/<slug>/api/subscribers` | → `{"subscribers": [...]}` |
+| `GET` | `/<slug>/api/subscribers` | `?cursor=` `&limit=` → `{"subscribers": [...], "next_cursor": ...}` |
 | `DELETE` | `/<slug>/api/subscribers/<id>` | → `{"ok": true}` |
 
 ### MCP (optional extra)
@@ -208,11 +222,20 @@ Implement the `NewsletterRepository` or `EmailSender` protocol — no base class
 
 ```python
 from quillet.db import NewsletterRepository
-from quillet.models import Newsletter, Post, Subscriber
+from quillet.models import Newsletter, NewsletterConfig, Page, Post, Subscriber
 
 class MyRepository:
     def get_newsletter(self, slug: str) -> Newsletter | None: ...
-    def list_posts(self, newsletter_slug: str, published_only: bool = True) -> list[Post]: ...
+    def list_newsletter_slugs(self) -> list[str]: ...
+    def list_posts(
+        self,
+        newsletter_slug: str,
+        published_only: bool = True,
+        *,
+        limit: int = 20,
+        before: str | None = None,
+        status: str | None = None,
+    ) -> Page: ...
     def get_post(self, newsletter_slug: str, post_slug: str) -> Post | None: ...
     def create_post(self, newsletter_slug: str, title: str, slug: str, body_md: str) -> Post: ...
     def update_post(self, post_id: int, title: str, slug: str, body_md: str) -> Post: ...
@@ -221,8 +244,12 @@ class MyRepository:
     def delete_post(self, post_id: int) -> None: ...
     def add_subscriber(self, newsletter_slug: str, email: str, token: str) -> Subscriber: ...
     def confirm_subscriber(self, token: str) -> Subscriber | None: ...
+    def get_subscriber_by_token(self, token: str) -> Subscriber | None: ...
     def list_confirmed_subscribers(self, newsletter_slug: str) -> list[Subscriber]: ...
-    def list_all_subscribers(self, newsletter_slug: str) -> list[Subscriber]: ...
+    def list_all_subscribers(
+        self, newsletter_slug: str, *, limit: int = 20, before: str | None = None
+    ) -> Page: ...
+    def purge_expired_pending(self, newsletter_id: int) -> int: ...
     def unsubscribe(self, token: str) -> None: ...
     def delete_subscriber(self, subscriber_id: int) -> None: ...
     def create_newsletter(self, slug: str, name: str, from_email: str, from_name: str, reply_to: str | None) -> Newsletter: ...
@@ -266,6 +293,7 @@ templates/
     ├── post_list.html
     ├── post_detail.html
     ├── subscribe_confirm.html
+    ├── unsubscribe_confirm.html
     └── admin/
         ├── dashboard.html
         ├── post_form.html
