@@ -25,10 +25,14 @@ repo) or installable via pip.
 
 ```
 quillet/
-├── __init__.py           → exposes create_blueprint, create_app
-├── factory.py            → wires everything together
+├── __init__.py           → exposes create_blueprint, create_app, create_asgi_app
+├── factory.py            → wires everything together (create_asgi_app = REST + MCP)
 ├── models.py             → Newsletter, Post, Subscriber (NamedTuples)
 ├── routes.py             → public + JSON API route handlers
+├── api_ops.py            → in-process admin ops shared by JSON API and MCP
+├── mcp_server.py         → Streamable HTTP MCP (optional extra)
+├── mcp.md                → agent bootstrap served at GET /{slug}/api/mcp.md
+├── openapi.yaml          → OpenAPI 3 spec served at GET /{slug}/api/openapi.yaml
 ├── admin.py              → browser admin UI route handlers
 ├── auth.py               → HTTP Basic Auth decorator
 ├── cli.py                → flask quillet ... CLI commands
@@ -235,6 +239,16 @@ GET  /<slug>/api/openapi.yaml
      OpenAPI 3 spec for the curated admin JSON API. Public (no auth).
      Response: YAML document (application/yaml)
 
+GET  /<slug>/api/mcp.md
+     Agent bootstrap for MCP: how to write .cursor/mcp.json with a URL to
+     this instance's Streamable HTTP MCP (/{slug}/mcp/). Public (no auth).
+     Password is not embedded — the human supplies it to the agent.
+     Response: Markdown (text/markdown)
+
+MCP  /<slug>/mcp/   (ASGI / uvicorn only)
+     MCP Streamable HTTP. Same Basic Auth as the JSON API.
+     Tools run in-process against the same DB and email backends as REST.
+
 GET  /<slug>/api/posts
      List posts including drafts. Optional query: status=all|draft|published|unsent|sent.
      Response: {"posts": [{id, newsletter_id, slug, title, body_md, published_at, sent_at}, ...]}
@@ -344,10 +358,7 @@ curl -s -u "$AUTH" -X POST "$BASE/$SLUG/api/posts/hello-world/send"
 | `QUILLET_SMTP_USE_TLS` | No | `true` | Set `false` for Mailhog / local SMTP |
 | `QUILLET_SMTP_USERNAME` | No | — | |
 | `QUILLET_SMTP_PASSWORD` | No | — | |
-| `QUILLET_MCP_BASE_URL` | If MCP | — | Base URL the MCP server calls (e.g. `http://127.0.0.1:8000`) |
-| `QUILLET_MCP_NEWSLETTER_SLUG` | No | `spike` | Newsletter slug for MCP tools |
-| `QUILLET_MCP_USERNAME` | No | `admin` | Basic Auth username used by the MCP server |
-| `QUILLET_MCP_PASSWORD` | If MCP | — | Basic Auth password used by the MCP server |
+| `QUILLET_MCP_SLUGS` | No | *(auto from DB)* | Comma-separated newsletter slugs to mount at `/{slug}/mcp/` (SQLAlchemy auto-discovers; set this for other backends) |
 
 ---
 
@@ -521,11 +532,8 @@ A post can only be sent once. Use `flask quillet send <slug> <post-slug> --force
 # Unit-level (Flask test client, in-memory SQLite, no network)
 python scripts/smoke_test.py
 
-# MCP tool-list + create_post round-trip (in-process HTTP)
+# MCP Streamable HTTP on ASGI app (tools/list + create_post)
 python scripts/mcp_smoke_test.py
-
-# Spike fixture seed/reset (local OpenAPI vs MCP matrix)
-python scripts/spike_fixture.py --reset
 
 # Integration (Docker, real HTTP, real gunicorn)
 ./scripts/docker_test.sh
@@ -539,13 +547,21 @@ python scripts/http_smoke_test.py
 
 ## MCP server (optional extra)
 
+MCP is hosted on the Quillet ASGI process (Streamable HTTP at `/{slug}/mcp/`).
+Tools call the same in-process ops as the JSON API. Same Basic Auth (`QUILLET_ADMIN_*`).
+
 ```bash
 pip install "quillet[mcp]"
+flask quillet create "My Blog" --slug=blog --from-email=hi@example.com
 
-QUILLET_MCP_BASE_URL=http://127.0.0.1:8000 \
-QUILLET_MCP_PASSWORD=secret \
-QUILLET_MCP_NEWSLETTER_SLUG=spike \
-python scripts/run_mcp_server.py
+QUILLET_ADMIN_PASSWORD=secret \
+uvicorn --factory quillet.factory:create_asgi_app --host 127.0.0.1 --port 8000
 ```
 
-The MCP server is a thin HTTP client over the curated JSON API — same operations, same auth.
+Seed newsletters **before** starting uvicorn (MCP mounts are created at startup).
+
+Agent flow: human gives base URL + password → agent fetches `GET /blog/api/mcp.md` →
+writes `.cursor/mcp.json` with `"url": "http://127.0.0.1:8000/blog/mcp/"` + Basic Auth header →
+human approves → tools/list.
+
+`flask run` / gunicorn WSGI entry does **not** expose MCP; use uvicorn (or another ASGI server) with `create_asgi_app`.

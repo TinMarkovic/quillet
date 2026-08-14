@@ -176,6 +176,12 @@ def run() -> int:
             failures += 1
             print("  [FAIL] openapi yaml: missing openapi: header")
 
+        r = client.get("/newsletter/blog/api/mcp.md")
+        failures += not _check("mcp bootstrap md", r.status_code, 200)
+        if b".cursor/mcp.json" not in r.data or b'"url"' not in r.data or b"/mcp/" not in r.data:
+            failures += 1
+            print("  [FAIL] mcp bootstrap md: missing expected URL-based bootstrap content")
+
         print("\n-- Admin UI --")
         failures += not _check(
             "new post form", client.get("/newsletter/blog/admin/posts/new", headers=auth).status_code, 200

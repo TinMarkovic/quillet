@@ -97,9 +97,9 @@ paths:
             schema:
               $ref: '#/components/schemas/CreatePostRequest'
             example:
-              title: Spike Note
-              slug: spike-note
-              body_md: "# Spike Note\n\nA short paragraph for the spike."
+              title: Hello World
+              slug: hello-world
+              body_md: "# Hello\n\nFirst post."
       responses:
         '201':
           description: Draft created
@@ -115,9 +115,9 @@ paths:
                 post:
                   id: 10
                   newsletter_id: 1
-                  slug: spike-note
-                  title: Spike Note
-                  body_md: "# Spike Note\n\nA short paragraph for the spike."
+                  slug: hello-world
+                  title: Hello World
+                  body_md: "# Hello\n\nFirst post."
                   published_at: null
                   sent_at: null
         '400':
@@ -200,9 +200,9 @@ paths:
                 post:
                   id: 10
                   newsletter_id: 1
-                  slug: spike-note
-                  title: Spike Note (edited)
-                  body_md: "# Spike Note\n\nEdited body."
+                  slug: hello-world
+                  title: Hello World (edited)
+                  body_md: "# Hello\n\nEdited body."
                   published_at: null
                   sent_at: null
         '400':
@@ -405,10 +405,10 @@ components:
       name: newsletter_slug
       in: path
       required: true
-      description: Newsletter URL slug (e.g. `spike`).
+      description: Newsletter URL slug (e.g. `blog`).
       schema:
         type: string
-      example: spike
+      example: blog
     PostSlug:
       name: post_slug
       in: path
@@ -416,7 +416,7 @@ components:
       description: Post URL slug unique within the newsletter.
       schema:
         type: string
-      example: seed-draft-alpha
+      example: hello-world
 
   schemas:
     Post:

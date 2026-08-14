@@ -15,6 +15,23 @@ from .email import EmailSender
 from .models import Newsletter
 
 
+def create_asgi_app(url_prefix: str = ""):
+    """
+    ASGI entry for REST + MCP (Streamable HTTP at ``/{slug}/mcp/``).
+
+    Requires ``pip install "quillet[mcp]"``. Seed newsletters before start —
+    MCP mounts are created at startup::
+
+        uvicorn --factory quillet.factory:create_asgi_app --host 127.0.0.1 --port 8000
+    """
+    try:
+        from .mcp_server import create_asgi_app as _create_asgi
+    except ImportError as exc:
+        raise ImportError('MCP requires the optional extra: pip install "quillet[mcp]"') from exc
+
+    return _create_asgi(flask_app=create_app(), url_prefix=url_prefix)
+
+
 def _wordcount_filter(text: str) -> int:
     return len(text.split())
 

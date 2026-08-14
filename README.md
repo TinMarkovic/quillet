@@ -146,12 +146,36 @@ All routes are prefixed with `/<newsletter_slug>/`.
 
 | Method | Path | Body / Response |
 |---|---|---|
+| `GET` | `/<slug>/api/openapi.yaml` | OpenAPI 3 spec (public, no auth) |
+| `GET` | `/<slug>/api/mcp.md` | MCP bootstrap for agents (public, no auth) |
+| `GET` | `/<slug>/api/posts` | `?status=all\|draft\|published\|unsent\|sent` → `{"posts": [...]}` |
+| `GET` | `/<slug>/api/posts/<post_slug>` | → `{"post": {...}}` (drafts included) |
 | `POST` | `/<slug>/api/posts` | `{"title", "slug", "body_md"}` → `{"post": {...}}` |
+| `PUT` | `/<slug>/api/posts/<post_slug>` | `{"title", "body_md", "slug?"}` → `{"post": {...}}` |
 | `POST` | `/<slug>/api/posts/<post_slug>/publish` | → `{"post": {...}}` |
+| `POST` | `/<slug>/api/posts/<post_slug>/send-test` | `{"email"}` → `{"ok": true}` (does not set `sent_at`) |
 | `POST` | `/<slug>/api/posts/<post_slug>/send` | → `{"ok": true, "recipients": N}` |
 | `DELETE` | `/<slug>/api/posts/<post_slug>` | → `{"ok": true}` |
 | `GET` | `/<slug>/api/subscribers` | → `{"subscribers": [...]}` |
 | `DELETE` | `/<slug>/api/subscribers/<id>` | → `{"ok": true}` |
+
+### MCP (optional extra)
+
+MCP is Streamable HTTP on the same Quillet process as REST (`/{slug}/mcp/`).
+
+```bash
+pip install "quillet[mcp]"   # mcp + uvicorn + a2wsgi
+
+# Newsletter must already exist (see CLI below), then:
+QUILLET_ADMIN_PASSWORD=secret \
+uvicorn --factory quillet.factory:create_asgi_app --host 127.0.0.1 --port 8000
+```
+
+MCP mounts are created at startup — seed newsletters **before** starting uvicorn. `flask run` / gunicorn serve REST only.
+
+1. Give an agent the base URL and admin password (e.g. `http://127.0.0.1:8000/blog`).
+2. It reads `/blog/api/mcp.md` and writes `.cursor/mcp.json` with a **url** to `/blog/mcp/` — you approve.
+3. Cursor connects over HTTP; tools call Quillet in-process.
 
 ---
 
@@ -312,6 +336,9 @@ Or via env var: `QUILLET_EMAIL_BACKEND=noop`
 ```bash
 # Fast: Flask test client, no server required
 python scripts/smoke_test.py
+
+# MCP Streamable HTTP (ASGI test client)
+python scripts/mcp_smoke_test.py
 
 # Full: build Docker image + one-shot container test
 ./scripts/docker_test.sh

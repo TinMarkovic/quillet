@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "quillet"
-version = "0.7.0"
+version = "0.8.0"
 description = "Flask newsletter + microblog package. Importable Blueprint, standalone web app, or headless API."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,9 +29,9 @@ sqlalchemy = ["SQLAlchemy>=2.0"]
 mailgun    = ["requests>=2.31"]
 smtp       = []
 supabase   = ["requests>=2.31"]
-mcp        = ["mcp[cli]>=1.28,<2", "requests>=2.31"]
-all        = ["SQLAlchemy>=2.0", "requests>=2.31", "mcp[cli]>=1.28,<2"]
-dev        = ["SQLAlchemy>=2.0", "requests>=2.31", "mcp[cli]>=1.28,<2", "pytest>=8.0", "pytest-flask>=1.3", "ruff", "black"]
+mcp        = ["mcp[cli]>=1.28,<2", "a2wsgi>=1.10", "uvicorn>=0.30", "starlette>=0.37"]
+all        = ["SQLAlchemy>=2.0", "requests>=2.31", "mcp[cli]>=1.28,<2", "a2wsgi>=1.10", "uvicorn>=0.30", "starlette>=0.37"]
+dev        = ["SQLAlchemy>=2.0", "requests>=2.31", "mcp[cli]>=1.28,<2", "a2wsgi>=1.10", "uvicorn>=0.30", "starlette>=0.37", "pytest>=8.0", "pytest-flask>=1.3", "ruff", "black"]
 
 [project.urls]
 Repository = "https://github.com/tinthe/quillet"

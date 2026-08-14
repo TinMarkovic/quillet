@@ -223,6 +223,11 @@ class SQLAlchemyRepository:
             return None
         return _row_to_newsletter(row)
 
+    def list_newsletter_slugs(self) -> list[str]:
+        with self._engine.connect() as conn:
+            rows = conn.execute(select(_newsletters.c.slug)).fetchall()
+        return [row.slug for row in rows]
+
     # --- Posts ---
 
     def list_posts(self, newsletter_slug: str, published_only: bool = True) -> list[Post]:

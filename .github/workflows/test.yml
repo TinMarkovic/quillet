@@ -29,3 +29,6 @@ jobs:
 
       - name: Smoke test
         run: python scripts/smoke_test.py
+
+      - name: MCP smoke test
+        run: python scripts/mcp_smoke_test.py

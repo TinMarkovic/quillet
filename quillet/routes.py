@@ -17,6 +17,7 @@ from flask import (
     url_for,
 )
 
+from . import api_ops
 from .auth import require_basic_auth
 from .db import NewsletterRepository
 from .email import EmailSender
@@ -77,20 +78,6 @@ def _confirm_url(bp_name: str, newsletter_slug: str, token: str) -> str:
     base = _base_url()
     path = url_for(f"{bp_name}.confirm_subscription", newsletter_slug=newsletter_slug, token=token)
     return urljoin(base, path)
-
-
-def _filter_posts_by_status(posts: list[Post], status: str) -> list[Post]:
-    if status == "all":
-        return posts
-    if status == "draft":
-        return [p for p in posts if p.published_at is None]
-    if status == "published":
-        return [p for p in posts if p.published_at is not None]
-    if status == "unsent":
-        return [p for p in posts if p.published_at is not None and p.sent_at is None]
-    if status == "sent":
-        return [p for p in posts if p.sent_at is not None]
-    return posts
 
 
 def _send_test_email(
@@ -330,146 +317,91 @@ def register_public_routes(bp: Blueprint) -> None:
         spec = resources.files("quillet").joinpath("openapi.yaml").read_text(encoding="utf-8")
         return Response(spec, mimetype="application/yaml")
 
-    @bp.get("/<newsletter_slug>/api/posts")
-    @require_basic_auth
-    def api_list_posts(newsletter_slug: str):
+    @bp.get("/<newsletter_slug>/api/mcp.md")
+    def api_mcp_bootstrap(newsletter_slug: str):
         newsletter = _db().get_newsletter(newsletter_slug)
         if newsletter is None:
             abort(404)
 
-        status = (request.args.get("status") or "all").strip().lower()
-        allowed = {"all", "draft", "published", "unsent", "sent"}
-        if status not in allowed:
-            return jsonify(error=f"status must be one of: {', '.join(sorted(allowed))}."), 400
+        template = resources.files("quillet").joinpath("mcp.md").read_text(encoding="utf-8")
+        body = template.format(
+            base_url=_base_url().rstrip("/"),
+            newsletter_slug=newsletter_slug,
+        )
+        return Response(body, mimetype="text/markdown; charset=utf-8")
 
-        posts = _db().list_posts(newsletter_slug, published_only=False)
-        filtered = _filter_posts_by_status(posts, status)
-        return jsonify(posts=[p._asdict() for p in filtered])
+    @bp.get("/<newsletter_slug>/api/posts")
+    @require_basic_auth
+    def api_list_posts(newsletter_slug: str):
+        payload, status = api_ops.list_posts(_db(), newsletter_slug, status=request.args.get("status") or "all")
+        return jsonify(payload), status
 
     @bp.get("/<newsletter_slug>/api/posts/<post_slug>")
     @require_basic_auth
     def api_get_post(newsletter_slug: str, post_slug: str):
-        newsletter = _db().get_newsletter(newsletter_slug)
-        if newsletter is None:
-            abort(404)
-
-        post = _db().get_post(newsletter_slug, post_slug)
-        if post is None:
-            abort(404)
-
-        return jsonify(post=post._asdict())
+        payload, status = api_ops.get_post(_db(), newsletter_slug, post_slug)
+        return jsonify(payload), status
 
     @bp.post("/<newsletter_slug>/api/posts")
     @require_basic_auth
     def api_create_post(newsletter_slug: str):
-        newsletter = _db().get_newsletter(newsletter_slug)
-        if newsletter is None:
-            abort(404)
-
         data = request.get_json(silent=True) or {}
-        title = (data.get("title") or "").strip()
-        slug = (data.get("slug") or "").strip()
-        body_md = (data.get("body_md") or "").strip()
-
-        if not title or not slug or not body_md:
-            return jsonify(error="title, slug, and body_md are required."), 400
-
-        post = _db().create_post(newsletter_slug, title, slug, body_md)
-        return jsonify(post=post._asdict()), 201
+        payload, status = api_ops.create_post(
+            _db(),
+            newsletter_slug,
+            title=data.get("title") or "",
+            slug=data.get("slug") or "",
+            body_md=data.get("body_md") or "",
+        )
+        return jsonify(payload), status
 
     @bp.put("/<newsletter_slug>/api/posts/<post_slug>")
     @require_basic_auth
     def api_update_post(newsletter_slug: str, post_slug: str):
-        newsletter = _db().get_newsletter(newsletter_slug)
-        if newsletter is None:
-            abort(404)
-
-        post = _db().get_post(newsletter_slug, post_slug)
-        if post is None:
-            abort(404)
-
         data = request.get_json(silent=True) or {}
-        title = (data.get("title") or "").strip()
-        body_md = (data.get("body_md") or "").strip()
-        new_slug = (data.get("slug") or "").strip() or post.slug
-
-        if not title or not body_md:
-            return jsonify(error="title and body_md are required."), 400
-
-        updated = _db().update_post(post.id, title, new_slug, body_md)
-        return jsonify(post=updated._asdict())
+        payload, status = api_ops.update_post(
+            _db(),
+            newsletter_slug,
+            post_slug,
+            title=data.get("title") or "",
+            body_md=data.get("body_md") or "",
+            slug=data.get("slug") or "",
+        )
+        return jsonify(payload), status
 
     @bp.post("/<newsletter_slug>/api/posts/<post_slug>/publish")
     @require_basic_auth
     def api_publish_post(newsletter_slug: str, post_slug: str):
-        newsletter = _db().get_newsletter(newsletter_slug)
-        if newsletter is None:
-            abort(404)
-
-        post = _db().get_post(newsletter_slug, post_slug)
-        if post is None:
-            abort(404)
-
-        updated = _db().publish_post(post.id)
-        return jsonify(post=updated._asdict())
+        payload, status = api_ops.publish_post(_db(), newsletter_slug, post_slug)
+        return jsonify(payload), status
 
     @bp.post("/<newsletter_slug>/api/posts/<post_slug>/send-test")
     @require_basic_auth
     def api_send_test_post(newsletter_slug: str, post_slug: str):
-        newsletter = _db().get_newsletter(newsletter_slug)
-        if newsletter is None:
-            abort(404)
-
-        post = _db().get_post(newsletter_slug, post_slug)
-        if post is None:
-            abort(404)
-
         data = request.get_json(silent=True) or {}
-        test_email = (data.get("email") or "").strip()
-        if not test_email:
-            return jsonify(error="email is required."), 400
-
-        _send_test_email(newsletter, post, test_email, name, newsletter_slug)
-        return jsonify(ok=True)
+        payload, status = api_ops.send_test(
+            current_app._get_current_object(),
+            newsletter_slug,
+            post_slug,
+            email=data.get("email") or "",
+        )
+        return jsonify(payload), status
 
     @bp.post("/<newsletter_slug>/api/posts/<post_slug>/send")
     @require_basic_auth
     def api_send_post(newsletter_slug: str, post_slug: str):
-        newsletter = _db().get_newsletter(newsletter_slug)
-        if newsletter is None:
-            abort(404)
-
-        post = _db().get_post(newsletter_slug, post_slug)
-        if post is None:
-            abort(404)
-        if post.published_at is None:
-            return jsonify(error="Post must be published before sending."), 400
-        if post.sent_at is not None:
-            return jsonify(error="Post has already been sent."), 409
-
-        subscribers = _db().list_confirmed_subscribers(newsletter_slug)
-        _email().send_post(
-            newsletter,
-            post,
-            subscribers,
-            _unsubscribe_url_template(name, newsletter_slug),
-            _db().get_newsletter_config(newsletter.id),
-            post_url=_post_url(name, newsletter_slug, post_slug),
-            post_list_url=_post_list_url(name, newsletter_slug),
+        payload, status = api_ops.send_post(
+            current_app._get_current_object(),
+            newsletter_slug,
+            post_slug,
         )
-        _db().mark_sent(post.id)
-
-        return jsonify(ok=True, recipients=len(subscribers))
+        return jsonify(payload), status
 
     @bp.get("/<newsletter_slug>/api/subscribers")
     @require_basic_auth
     def api_list_subscribers(newsletter_slug: str):
-        newsletter = _db().get_newsletter(newsletter_slug)
-        if newsletter is None:
-            abort(404)
-
-        subscribers = _db().list_all_subscribers(newsletter_slug)
-        return jsonify(subscribers=[s._asdict() for s in subscribers])
+        payload, status = api_ops.list_subscribers(_db(), newsletter_slug)
+        return jsonify(payload), status
 
     @bp.delete("/<newsletter_slug>/api/posts/<post_slug>")
     @require_basic_auth
