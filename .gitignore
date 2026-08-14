@@ -13,3 +13,10 @@ build/
 .env.*
 !.env.example
 llm/
+.cursor/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.DS_Store
