@@ -18,7 +18,7 @@ from sqlalchemy import text
 
 from quillet import create_blueprint
 from quillet.db.sqlalchemy import SQLAlchemyRepository
-from quillet.models import CONFIRM_TTL
+from quillet.models import CONFIRM_TTL, is_pending_expired
 from quillet.robots import register_robots, robots_txt
 
 
@@ -256,6 +256,33 @@ def run() -> int:
         if db.get_subscriber_by_token(stale.token) is not None:
             failures += 1
             print("  [FAIL] expired pending should be deleted on confirm")
+
+        if not is_pending_expired(None, None):
+            failures += 1
+            print("  [FAIL] pending with no created_at should be expired")
+
+        client.post("/newsletter/blog/subscribe", data={"email": "null-created@example.com"})
+        null_pending = next(s for s in db.list_all_subscribers("blog").items if s.email == "null-created@example.com")
+        with db._engine.begin() as conn:
+            conn.execute(
+                text("UPDATE subscribers SET created_at = NULL WHERE id = :id"),
+                {"id": null_pending.id},
+            )
+        db.list_all_subscribers("blog")
+        if db.get_subscriber_by_token(null_pending.token) is not None:
+            failures += 1
+            print("  [FAIL] null created_at pending should be purged on list")
+
+        confirmed = next(s for s in db.list_all_subscribers("blog").items if s.email == "reader2@example.com")
+        with db._engine.begin() as conn:
+            conn.execute(
+                text("UPDATE subscribers SET created_at = NULL WHERE id = :id"),
+                {"id": confirmed.id},
+            )
+        db.list_all_subscribers("blog")
+        if db.get_subscriber_by_token(confirmed.token) is None:
+            failures += 1
+            print("  [FAIL] confirmed subscriber must not be purged when created_at is null")
 
         for i in range(21):
             post = db.create_post("blog", f"P{i}", f"p-{i}", f"# P{i}\n\nbody")

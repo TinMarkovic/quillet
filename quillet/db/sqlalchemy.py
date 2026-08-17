@@ -160,7 +160,14 @@ def _ensure_subscriber_created_at(engine) -> None:
     with engine.begin() as conn:
         if "created_at" not in columns:
             conn.execute(text("ALTER TABLE subscribers ADD COLUMN created_at TIMESTAMP"))
-        conn.execute(text("UPDATE subscribers SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+        # ponytail: skip pending NULLs — stamping them to NOW restarts the 3-day TTL
+        # (why production never purged pre-migration rows). Purge deletes those instead.
+        conn.execute(
+            text(
+                "UPDATE subscribers SET created_at = CURRENT_TIMESTAMP "
+                "WHERE created_at IS NULL AND confirmed_at IS NOT NULL"
+            )
+        )
 
 
 def _utc_now() -> datetime:
@@ -503,7 +510,10 @@ class SQLAlchemyRepository:
                 delete(_subscribers).where(
                     (_subscribers.c.newsletter_id == newsletter_id)
                     & (_subscribers.c.confirmed_at.is_(None))
-                    & (_subscribers.c.created_at < _cutoff_naive())
+                    & or_(
+                        _subscribers.c.created_at.is_(None),
+                        _subscribers.c.created_at < _cutoff_naive(),
+                    )
                 )
             )
         return result.rowcount or 0

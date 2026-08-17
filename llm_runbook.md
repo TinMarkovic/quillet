@@ -437,7 +437,7 @@ class MyRepository:
     # Keyset page on (created_at, id). Call purge_expired_pending first.
 
     def purge_expired_pending(self, newsletter_id: int) -> int: ...
-    # Hard-delete pending (confirmed_at is None) older than 3 days.
+    # Hard-delete pending (confirmed_at is None) older than 3 days, or with no created_at.
 
     def unsubscribe(self, token: str) -> None: ...
     # Mark as unsubscribed. Should not raise if token not found.

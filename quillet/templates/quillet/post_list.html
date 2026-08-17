@@ -49,6 +49,7 @@
         var url = new URL(link.href, window.location.origin);
         url.searchParams.set('partial', '1');
         fetch(url).then(function (r) { return r.text(); }).then(function (html) {
+          list.querySelectorAll('[data-next-cursor]').forEach(function (m) { m.remove(); });
           list.insertAdjacentHTML('beforeend', html);
           var marker = list.querySelector('[data-next-cursor]');
           if (marker) {

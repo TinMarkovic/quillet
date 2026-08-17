@@ -44,7 +44,7 @@ class SupabaseRestRepository:
     Requires tables: newsletters, posts, subscribers
     (same schema as SQLAlchemyRepository). Hosts must include
     ``subscribers.created_at`` (timestamptz). Pending rows older than 3 days
-    are hard-deleted on subscriber-touch.
+    (or with a null ``created_at``) are hard-deleted on subscriber-touch.
     """
 
     def __init__(self, supabase_url: str, supabase_key: str) -> None:
@@ -347,7 +347,7 @@ class SupabaseRestRepository:
             {
                 "newsletter_id": f"eq.{newsletter_id}",
                 "confirmed_at": "is.null",
-                "created_at": f"lt.{cutoff}",
+                "or": f"(created_at.is.null,created_at.lt.{cutoff})",
                 "select": "id",
             },
         )

@@ -110,5 +110,5 @@ def is_pending_expired(created_at: datetime | None, confirmed_at: datetime | Non
         return False
     created = as_utc(created_at)
     if created is None:
-        return False
+        return True
     return created < datetime.now(timezone.utc) - CONFIRM_TTL
