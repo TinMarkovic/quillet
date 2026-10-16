@@ -233,8 +233,12 @@ POST /<slug>/subscribe
      Response: HTML confirmation page OR {"ok": true, "message": "Confirmation email sent."} (201)
 
 GET  /<slug>/confirm/<token>
-     Confirm subscription. Token comes from the confirmation email.
+     Confirm form. Does not set confirmed_at. JSON GET → 405 Allow: POST.
      Pending unconfirmed rows expire after 3 days (hard-deleted).
+     The link in the confirmation email is this GET URL.
+
+POST /<slug>/confirm/<token>
+     Confirm the subscription. Already confirmed is a no-op (confirmed_at unchanged).
      Response: HTML state page OR {"ok": true} / {"error": "..."} (404)
 
 GET  /<slug>/unsubscribe/<token>
@@ -296,13 +300,27 @@ POST /<slug>/api/posts/<post_slug>/publish
 
 POST /<slug>/api/posts/<post_slug>/send-test
      Email a single preview address. Does NOT set sent_at.
-     Body: {"email": "owner@example.com"}
+     Body: {"email": "owner@example.com", "section_md?": "...", "section_position?": "append"|"prepend"}
+     section_md is this email only and is not saved on the post.
      Response: {"ok": true} (200)
 
 POST /<slug>/api/posts/<post_slug>/send
      Email the post to all confirmed subscribers.
      Post must be published first. Returns 400 if not published, 409 if already sent.
+     Optional body: {"section_md": "...", "section_position": "append"|"prepend"}.
+     Unknown section_position → 400 and sent_at stays null.
+     The same section goes to every recipient of this send.
      Response: {"ok": true, "recipients": N} (200)
+
+POST /<slug>/api/subscribers/invite
+     Personal confirm email. Body: {"email", "body_md?", "reset?"}.
+     201 new pending, 200 existing pending/unsubscribed or confirmed+reset, 409 already confirmed.
+     body_md is not stored. {confirm_url} and {newsletter_name} are optional placeholders.
+
+POST /<slug>/api/subscribers/<id>/reset
+     Clear confirmed_at, refresh created_at (3-day clock restarts). No email. Token unchanged.
+     Other newsletter's id → 404.
+     Response: {"ok": true, "subscriber": {...}}
 
 GET  /<slug>/api/subscribers
      List subscribers (confirmed and pending), a page at a time.
@@ -330,9 +348,16 @@ POST /<slug>/admin/posts/<post_slug>/publish
 
 POST /<slug>/admin/posts/<post_slug>/send
      Send and redirect to dashboard. No-op if already sent.
+     Optional form fields section_md and section_position (append|prepend), email only.
 
 GET  /<slug>/admin/subscribers
-     Table of all subscribers with confirmation status.
+     Table of all subscribers with confirmation status, plus an invite form.
+
+POST /<slug>/admin/subscribers/invite
+     Form: email, body_md, reset=1. Same rules as the JSON invite.
+
+POST /<slug>/admin/subscribers/<id>/reset
+     Clear confirmation. No email. Redirects back to the list.
 ```
 
 ---
@@ -354,8 +379,10 @@ curl -s -u "$AUTH" -X POST "$BASE/$SLUG/api/posts" \
 # Publish
 curl -s -u "$AUTH" -X POST "$BASE/$SLUG/api/posts/hello-world/publish"
 
-# Send to subscribers
-curl -s -u "$AUTH" -X POST "$BASE/$SLUG/api/posts/hello-world/send"
+# Send to subscribers, with a note that is not saved on the post
+curl -s -u "$AUTH" -X POST "$BASE/$SLUG/api/posts/hello-world/send" \
+  -H "Content-Type: application/json" \
+  -d '{"section_md":"See you Thursday.","section_position":"append"}'
 ```
 
 ---
@@ -428,6 +455,17 @@ class MyRepository:
 
     def get_subscriber_by_token(self, token: str) -> Subscriber | None: ...
 
+    def find_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None: ...
+    # Any row for this address, including unsubscribed. Purge expired pending first.
+    # Newest id wins when the address has more than one row.
+
+    def reset_confirmation(
+        self, newsletter_id: int, subscriber_id: int, *, resubscribe: bool = False
+    ) -> Subscriber | None: ...
+    # confirmed_at=None, created_at=now. Does not change the token.
+    # resubscribe=True also sets unsubscribed=False (invite path). Bare reset leaves it.
+    # None if the id is not in this newsletter.
+
     def list_confirmed_subscribers(self, newsletter_slug: str) -> list[Subscriber]: ...
     # Full set. Only confirmed (confirmed_at not None) and not unsubscribed. Used by send.
 
@@ -448,12 +486,16 @@ class MyRepository:
 ## Writing a custom email backend
 
 ```python
+from quillet.models import Newsletter, NewsletterConfig, Post, Subscriber
+
 class MyEmailSender:
     def send_confirmation(
         self,
         newsletter: Newsletter,
         subscriber: Subscriber,
         confirm_url: str,           # full URL to click — embed in email body
+        config: NewsletterConfig | None = None,
+        body_md: str | None = None, # personal invite; None keeps the stock opener
     ) -> None: ...
 
     def send_post(
@@ -463,6 +505,11 @@ class MyEmailSender:
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,  # e.g. "https://example.com/blog/unsubscribe/{token}"
                                         # replace {token} with each subscriber's token
+        config: NewsletterConfig | None = None,
+        post_url: str = "",
+        post_list_url: str = "",
+        section_md: str = "",           # this send only; do not write it onto the post
+        section_position: str = "append",  # or "prepend"
     ) -> None: ...
 ```
 

@@ -52,9 +52,13 @@ After the file is saved, refresh MCP in Cursor (Settings → MCP) or start a new
 
 ## Tools
 
-`list_posts` · `get_post` · `create_post` · `update_post` · `publish_post` · `send_test` · `send_post` · `list_subscribers`
+`list_posts` · `get_post` · `create_post` · `update_post` · `publish_post` · `send_test` · `send_post` · `list_subscribers` · `invite_subscriber` · `reset_subscriber`
 
 `list_posts` and `list_subscribers` return a page (`next_cursor`). Pass `cursor` to fetch older rows; loop until `next_cursor` is null. `send_post` emails the full confirmed list (not a page).
+
+`send_post` and `send_test` take optional `section_md` and `section_position` (`append` or `prepend`). That note is in the email only and is not saved on the post.
+
+`invite_subscriber(email, body_md="", reset=false)` sends a personal confirm email. Already-confirmed addresses return 409 unless `reset` is true. `reset_subscriber(subscriber_id)` clears confirmation and sends nothing.
 
 Same operations as the JSON API. Read the OpenAPI document if you need request/response shapes.
 

@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from quillet import create_blueprint
 from quillet.db.sqlalchemy import SQLAlchemyRepository
+from quillet.email._utils import apply_send_section, render_invite_md
 from quillet.models import CONFIRM_TTL, is_pending_expired
 from quillet.robots import register_robots, robots_txt
 
@@ -27,8 +28,14 @@ class _NoopSender:
 
     def __init__(self) -> None:
         self.last_send_count = 0
+        self.confirmations = 0
+        self.last_confirm_body: str | None = None
+        self.last_section_md = ""
+        self.last_section_position = "append"
 
-    def send_confirmation(self, newsletter, subscriber, confirm_url, config=None):
+    def send_confirmation(self, newsletter, subscriber, confirm_url, config=None, body_md=None):
+        self.confirmations += 1
+        self.last_confirm_body = body_md
         print(f"  [email] confirmation → {subscriber.email}  url={confirm_url}")
 
     def send_post(
@@ -40,9 +47,57 @@ class _NoopSender:
         config=None,
         post_url="",
         post_list_url="",
+        section_md="",
+        section_position="append",
     ):
         self.last_send_count = len(subscribers)
+        self.last_section_md = section_md
+        self.last_section_position = section_position
         print(f"  [email] post '{post.title}' → {len(subscribers)} subscriber(s)")
+
+
+def _tied_second_ids(db: SQLAlchemyRepository) -> list[int]:
+    newsletter = db.get_newsletter("blog")
+    assert newsletter is not None
+    ids: list[int] = []
+    with db._engine.begin() as conn:
+        for index in range(24):
+            result = conn.execute(
+                text(
+                    "INSERT INTO subscribers (newsletter_id, email, token, unsubscribed, confirmed_at, created_at) "
+                    "VALUES (:nid, :email, :token, 0, '2026-08-14 14:51:47', '2026-08-14 14:51:47')"
+                ),
+                {"nid": newsletter.id, "email": f"tied-{index}@example.com", "token": f"tied-token-{index}"},
+            )
+            ids.append(result.lastrowid)
+        result = conn.execute(
+            text(
+                "INSERT INTO subscribers (newsletter_id, email, token, unsubscribed, confirmed_at, created_at) "
+                "VALUES (:nid, 'tied-frac@example.com', 'tied-token-frac', 0, "
+                "'2026-08-14 14:51:47.500000', '2026-08-14 14:51:47.500000')"
+            ),
+            {"nid": newsletter.id},
+        )
+        ids.append(result.lastrowid)
+    return ids
+
+
+def _walk_subscriber_ids(db: SQLAlchemyRepository) -> tuple[list[int], str | None]:
+    seen: list[int] = []
+    cursors: list[str] = []
+    cursor = None
+    for _ in range(12):
+        page = db.list_all_subscribers("blog", limit=20, before=cursor)
+        if seen and page.items and page.items[0].id == seen[-1]:
+            return seen, "page repeated the previous last id"
+        seen.extend(sub.id for sub in page.items)
+        if page.next_cursor is None:
+            return seen, None
+        if page.next_cursor in cursors:
+            return seen, "cursor repeated"
+        cursors.append(page.next_cursor)
+        cursor = page.next_cursor
+    return seen, "walk did not finish"
 
 
 def _auth_header(password: str = "secret") -> dict:
@@ -55,6 +110,154 @@ def _check(label: str, got: int, expected: int) -> bool:
     status = "OK" if ok else "FAIL"
     print(f"  [{status}] {label}: HTTP {got}" + ("" if ok else f" (expected {expected})"))
     return ok
+
+
+def _invite_checks(client, db: SQLAlchemyRepository, sender: _NoopSender, auth: dict) -> int:
+    failures = 0
+    print("\n-- Invite / reset --")
+    before = sender.confirmations
+    response = client.post(
+        "/newsletter/blog/api/subscribers/invite",
+        json={"email": "met@example.com", "body_md": "Good to meet you."},
+        headers=auth,
+    )
+    failures += not _check("invite new subscriber", response.status_code, 201)
+    met = db.find_subscriber_by_email(db.get_newsletter("blog").id, "met@example.com")
+    if (
+        met is None
+        or met.confirmed_at is not None
+        or sender.confirmations != before + 1
+        or sender.last_confirm_body != "Good to meet you."
+    ):
+        failures += 1
+        print("  [FAIL] invite should create one pending row and send the blurb")
+
+    response = client.post(
+        "/newsletter/blog/api/subscribers/invite",
+        json={"email": "met@example.com", "body_md": "Still there."},
+        headers=auth,
+    )
+    failures += not _check("invite pending resend", response.status_code, 200)
+    rows = [sub for sub in _all_subscribers(db) if sub.email == "met@example.com"]
+    if len(rows) != 1:
+        failures += 1
+        print(f"  [FAIL] invite resend should keep one row, got {len(rows)}")
+
+    assert met is not None
+    client.post(f"/newsletter/blog/confirm/{met.token}")
+    confirmed = db.get_subscriber_by_token(met.token)
+    assert confirmed is not None and confirmed.confirmed_at is not None
+    response = client.post(
+        "/newsletter/blog/api/subscribers/invite",
+        json={"email": "met@example.com", "body_md": "Again."},
+        headers=auth,
+    )
+    failures += not _check("invite already confirmed → 409", response.status_code, 409)
+    if response.is_json and response.json.get("error") != "Already confirmed. Pass reset to reconfirm.":
+        failures += 1
+        print("  [FAIL] 409 body should name reset")
+    still = db.get_subscriber_by_token(met.token)
+    if still is None or still.confirmed_at != confirmed.confirmed_at:
+        failures += 1
+        print("  [FAIL] 409 invite must leave confirmation in place")
+
+    admin = client.post(
+        "/newsletter/blog/admin/subscribers/invite",
+        data={"email": "met@example.com", "body_md": "From the form."},
+        headers=auth,
+    )
+    failures += not _check("admin invite already confirmed → 409", admin.status_code, 409)
+    if b"Already confirmed" not in admin.data:
+        failures += 1
+        print("  [FAIL] admin invite error should render on the subscriber page")
+
+    token = met.token
+    mailed = sender.confirmations
+    response = client.post(
+        "/newsletter/blog/api/subscribers/invite",
+        json={"email": "met@example.com", "body_md": "One more time.", "reset": True},
+        headers=auth,
+    )
+    failures += not _check("invite reset reconfirm", response.status_code, 200)
+    reconfirmed = db.get_subscriber_by_token(token)
+    if (
+        reconfirmed is None
+        or reconfirmed.confirmed_at is not None
+        or reconfirmed.token != token
+        or sender.last_confirm_body != "One more time."
+        or sender.confirmations != mailed + 1
+    ):
+        failures += 1
+        print("  [FAIL] reset invite should email, keep the token, and leave the row pending")
+
+    client.post(f"/newsletter/blog/confirm/{token}")
+    with db._engine.begin() as conn:
+        conn.execute(
+            text("UPDATE subscribers SET created_at = '2020-01-01 00:00:00' WHERE id = :id"),
+            {"id": met.id},
+        )
+    mailed = sender.confirmations
+    response = client.post(f"/newsletter/blog/api/subscribers/{met.id}/reset", headers=auth)
+    failures += not _check("reset confirmation leaves pending", response.status_code, 200)
+    reset_row = db.get_subscriber_by_token(token)
+    if (
+        reset_row is None
+        or reset_row.confirmed_at is not None
+        or reset_row.token != token
+        or reset_row.created_at is None
+        or reset_row.created_at.year == 2020
+        or sender.confirmations != mailed
+    ):
+        failures += 1
+        print("  [FAIL] reset should clear confirmation, keep the token, refresh created_at, and not email")
+
+    preview = client.get(f"/newsletter/blog/confirm/{token}")
+    after_preview = db.get_subscriber_by_token(token)
+    if preview.status_code != 200 or b"Yes, subscribe" not in preview.data:
+        failures += 1
+        print("  [FAIL] confirm GET after reset should show the form")
+    if after_preview is None or after_preview.confirmed_at is not None:
+        failures += 1
+        print("  [FAIL] confirm GET after reset must not confirm")
+
+    db.unsubscribe(token)
+    response = client.post(
+        "/newsletter/blog/api/subscribers/invite",
+        json={"email": "met@example.com", "body_md": "Welcome back."},
+        headers=auth,
+    )
+    failures += not _check("invite unsubscribed resubscribes", response.status_code, 200)
+    returned = db.get_subscriber_by_token(token)
+    if returned is None or returned.unsubscribed or returned.confirmed_at is not None:
+        failures += 1
+        print("  [FAIL] invite of an unsubscribed address should clear unsubscribed and stay pending")
+
+    other = db.create_newsletter("other", "Other", "o@example.com", "Other", None)
+    foreign = db.add_subscriber("other", "foreign@example.com", "foreign-token")
+    db.confirm_subscriber(foreign.token)
+    foreign_stamp = db.get_subscriber_by_token("foreign-token").confirmed_at
+    response = client.post(f"/newsletter/blog/api/subscribers/{foreign.id}/reset", headers=auth)
+    failures += not _check("reset other newsletter → 404", response.status_code, 404)
+    foreign_after = db.get_subscriber_by_token("foreign-token")
+    if foreign_after is None or foreign_after.confirmed_at != foreign_stamp:
+        failures += 1
+        print("  [FAIL] foreign reset must not change the other newsletter")
+    if other.id == db.get_newsletter("blog").id:
+        failures += 1
+        print("  [FAIL] other newsletter collided with blog")
+    return failures
+
+
+def _all_subscribers(db: SQLAlchemyRepository) -> list:
+    rows = []
+    cursor = None
+    for _ in range(12):
+        page = db.list_all_subscribers("blog", limit=100, before=cursor)
+        rows.extend(page.items)
+        if page.next_cursor is None:
+            return rows
+        cursor = page.next_cursor
+    return rows
 
 
 def run() -> int:
@@ -95,7 +298,32 @@ def run() -> int:
         subscribers = db.list_all_subscribers("blog").items
         token = subscribers[0].token
         r = client.get(f"/newsletter/blog/confirm/{token}")
-        failures += not _check("confirm subscription", r.status_code, 200)
+        failures += not _check("confirm GET does not confirm", r.status_code, 200)
+        if b"Yes, subscribe" not in r.data:
+            failures += 1
+            print("  [FAIL] confirm GET: expected confirm form")
+        pending = db.get_subscriber_by_token(token)
+        if pending is None or pending.confirmed_at is not None:
+            failures += 1
+            print("  [FAIL] confirm GET must not set confirmed_at")
+        r = client.get(
+            f"/newsletter/blog/confirm/{token}",
+            headers={"Accept": "application/json"},
+        )
+        failures += not _check("confirm JSON GET → 405", r.status_code, 405)
+        r = client.post(f"/newsletter/blog/confirm/{token}")
+        failures += not _check("confirm POST confirms", r.status_code, 200)
+        confirmed_reader = db.get_subscriber_by_token(token)
+        if confirmed_reader is None or confirmed_reader.confirmed_at is None:
+            failures += 1
+            print("  [FAIL] confirm POST must set confirmed_at")
+        else:
+            stamp = confirmed_reader.confirmed_at
+            client.post(f"/newsletter/blog/confirm/{token}")
+            again = db.get_subscriber_by_token(token)
+            if again is None or again.confirmed_at != stamp:
+                failures += 1
+                print("  [FAIL] second confirm POST must not rewrite confirmed_at")
         failures += not _check(
             "invalid token → 200 (renders invalid state)",
             client.get("/newsletter/blog/confirm/bad-token").status_code,
@@ -190,8 +418,58 @@ def run() -> int:
         reader2 = next(s for s in db.list_all_subscribers("blog").items if s.email == "reader2@example.com")
         db.confirm_subscriber(reader2.token)
 
-        r = client.post("/newsletter/blog/api/posts/hello-world/send", headers=auth)
+        r = client.post(
+            "/newsletter/blog/api/posts/hello-world/send",
+            json={"section_md": "SECTION-MARKER", "section_position": "beside"},
+            headers=auth,
+        )
+        failures += not _check("send section bad position → 400", r.status_code, 400)
+        r = client.get("/newsletter/blog/api/posts/hello-world", headers=auth)
+        if r.is_json and r.json.get("post", {}).get("sent_at") is not None:
+            failures += 1
+            print("  [FAIL] rejected section must not set sent_at")
+
+        r = client.post(
+            "/newsletter/blog/api/posts/hello-world/send",
+            json={"section_md": "SECTION-MARKER", "section_position": "append"},
+            headers=auth,
+        )
         failures += not _check("send post", r.status_code, 200)
+        stored = client.get("/newsletter/blog/api/posts/hello-world", headers=auth)
+        public = client.get("/newsletter/blog/posts/hello-world")
+        stored_body = ""
+        if stored.is_json:
+            stored_body = stored.json.get("post", {}).get("body_md") or ""
+        section_kept_off_post = (
+            sender.last_section_md == "SECTION-MARKER"
+            and sender.last_section_position == "append"
+            and "SECTION-MARKER" not in stored_body
+            and b"SECTION-MARKER" not in public.data
+        )
+        if not section_kept_off_post:
+            failures += 1
+            print("  [FAIL] section marker leaked onto the post or was not passed to the sender")
+        failures += not _check("send section is not stored on the post", 200 if section_kept_off_post else 0, 200)
+
+        prepended = apply_send_section("# Title\n\nbody", "SECTION-MARKER", "prepend")
+        appended = apply_send_section("# Title\n\nbody", "SECTION-MARKER", "append")
+        if not prepended.startswith("SECTION-MARKER") or not appended.endswith("SECTION-MARKER"):
+            failures += 1
+            print("  [FAIL] apply_send_section placement")
+        invite_md = render_invite_md("Good to meet you.", "Test Blog", "https://example.test/confirm/abc")
+        if invite_md is None or "https://example.test/confirm/abc" not in invite_md:
+            failures += 1
+            print("  [FAIL] render_invite_md should append the confirm link")
+
+        r = client.post(
+            "/newsletter/blog/api/posts/hello-world/send-test",
+            json={"email": "owner@example.com", "section_md": "PREPEND-MARKER", "section_position": "prepend"},
+            headers=auth,
+        )
+        failures += not _check("send-test section prepend", r.status_code, 200)
+        if sender.last_section_md != "PREPEND-MARKER" or sender.last_section_position != "prepend":
+            failures += 1
+            print("  [FAIL] send-test did not record prepend section")
         if sender.last_send_count != 1:
             failures += 1
             print(f"  [FAIL] send post should reach 1 confirmed, got {sender.last_send_count}")
@@ -311,6 +589,14 @@ def run() -> int:
         r = client.get("/newsletter/blog/?cursor=not-a-cursor")
         failures += not _check("invalid cursor → 400", r.status_code, 400)
 
+        tied_ids = _tied_second_ids(db)
+        seen_ids, walk_error = _walk_subscriber_ids(db)
+        tied_seen = [item for item in seen_ids if item in set(tied_ids)]
+        tied_ok = walk_error is None and len(tied_seen) == len(tied_ids) and len(set(tied_seen)) == len(tied_ids)
+        if not tied_ok:
+            print(f"  [FAIL] tied-second walk: {walk_error} got {len(set(tied_seen))} of {len(tied_ids)}")
+        failures += not _check("sqlite tied-second page walks every id once", 200 if tied_ok else 0, 200)
+
         r = client.get("/newsletter/blog/posts/hello-world", headers={"Accept": "text/markdown"})
         failures += not _check("markdown post", r.status_code, 200)
         if b"# Hello World" not in r.data:
@@ -374,6 +660,8 @@ def run() -> int:
         if not confirmed or sender.last_send_count != len(confirmed):
             failures += 1
             print(f"  [FAIL] send should reach all {len(confirmed)} confirmed, got {sender.last_send_count}")
+
+        failures += _invite_checks(client, db, sender, auth)
 
     print(f"\n{'All checks passed.' if not failures else f'{failures} check(s) FAILED.'}")
     return failures

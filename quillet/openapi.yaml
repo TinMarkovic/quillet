@@ -13,6 +13,7 @@ info:
     - **Publish** sets `published_at` and makes the post visible on the public archive.
     - **Send-test** emails a single address without marking the post as sent (`sent_at` stays null).
     - **Send** emails all confirmed subscribers and sets `sent_at`. A second full send returns 409.
+      Optional `section_md` is included in that email only and is not saved on the post.
 servers:
   - url: /
     description: Quillet instance base URL (include any blueprint url_prefix)
@@ -20,7 +21,7 @@ tags:
   - name: posts
     description: Create, read, update, publish, and send posts
   - name: subscribers
-    description: List subscribers for a newsletter
+    description: List, invite, and reset subscribers for a newsletter
 paths:
   /{newsletter_slug}/api/posts:
     get:
@@ -287,8 +288,18 @@ paths:
                   type: string
                   format: email
                   description: Destination address for the test email.
+                section_md:
+                  type: string
+                  description: Markdown included in this email only. Not saved on the post. Empty omits it.
+                section_position:
+                  type: string
+                  enum: [append, prepend]
+                  default: append
+                  description: Where section_md sits relative to the post. The unsubscribe footer stays last.
               example:
                 email: owner@example.com
+                section_md: See you Thursday.
+                section_position: append
       responses:
         '200':
           description: Test email accepted by the configured email backend
@@ -322,11 +333,32 @@ paths:
         - Post must not already have been sent (`sent_at` null) — otherwise 409.
 
         Do not use this when you only want a personal preview; use send-test instead.
+
+        Optional `section_md` is the same extra markdown for every recipient of this send.
+        `section_position` is `append` (default) or `prepend`. Unknown positions return 400
+        and do not set `sent_at`.
       security:
         - basicAuth: []
       parameters:
         - $ref: '#/components/parameters/NewsletterSlug'
         - $ref: '#/components/parameters/PostSlug'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                section_md:
+                  type: string
+                  description: Markdown included in this email only. Not saved on the post.
+                section_position:
+                  type: string
+                  enum: [append, prepend]
+                  default: append
+              example:
+                section_md: See you Thursday.
+                section_position: append
       responses:
         '200':
           description: Post emailed to the list
@@ -407,6 +439,123 @@ paths:
                     unsubscribed: false
                     created_at: "2026-08-01T09:55:00+00:00"
                 next_cursor: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /{newsletter_slug}/api/subscribers/invite:
+    post:
+      operationId: invite_subscriber
+      tags: [subscribers]
+      summary: Invite an address with a personal note
+      description: |
+        Email a confirm link. `body_md` replaces the stock confirmation text for this
+        email only and is not stored. `{confirm_url}` and `{newsletter_name}` are
+        substituted when present; if the note never includes the confirm URL, the link
+        is appended.
+
+        A new address is created as pending (201). A pending or unsubscribed address is
+        refreshed and emailed again (200). An already-confirmed address returns 409
+        unless `reset` is true, which clears confirmation and sends the invite.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                body_md:
+                  type: string
+                  description: Optional personal note. Empty uses the stock confirmation email.
+                reset:
+                  type: boolean
+                  default: false
+                  description: When true, clear confirmation on an existing row before sending.
+              example:
+                email: met@example.com
+                body_md: Good to meet you.
+                reset: false
+      responses:
+        '201':
+          description: New pending subscriber created and emailed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, subscriber]
+                properties:
+                  ok:
+                    type: boolean
+                  subscriber:
+                    $ref: '#/components/schemas/Subscriber'
+        '200':
+          description: Existing row refreshed and emailed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, subscriber]
+                properties:
+                  ok:
+                    type: boolean
+                  subscriber:
+                    $ref: '#/components/schemas/Subscriber'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Address is already confirmed and reset was not set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Already confirmed. Pass reset to reconfirm.
+
+  /{newsletter_slug}/api/subscribers/{subscriber_id}/reset:
+    post:
+      operationId: reset_subscriber
+      tags: [subscribers]
+      summary: Clear confirmation without sending email
+      description: |
+        Sets `confirmed_at` null and refreshes `created_at`, restarting the 3-day
+        pending clock. Does not rotate the token and does not send email.
+        GET of the confirm link does not confirm; the person must POST.
+        An id from another newsletter returns 404.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NewsletterSlug'
+        - name: subscriber_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Subscriber is pending again
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, subscriber]
+                properties:
+                  ok:
+                    type: boolean
+                  subscriber:
+                    $ref: '#/components/schemas/Subscriber'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':

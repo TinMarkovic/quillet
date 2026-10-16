@@ -110,7 +110,7 @@ def test_subscribe(failures: list) -> tuple[str | None]:
         token = data["subscribers"][-1]["token"]
 
     if token:
-        status, _ = req("GET", f"/{SLUG}/confirm/{token}")
+        status, _ = req("POST", f"/{SLUG}/confirm/{token}")
         failures += [1] if not check("confirm subscription", status, 200) else []
 
     status, _ = req("GET", f"/{SLUG}/confirm/bad-token")

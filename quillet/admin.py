@@ -4,15 +4,26 @@ import re
 from flask import (
     Blueprint,
     abort,
+    current_app,
     redirect,
     render_template,
     request,
     url_for,
 )
 
+from . import api_ops
 from .auth import require_basic_auth
-from .models import InvalidCursor, NewsletterConfig
+from .email._utils import normalize_section_position
+from .models import InvalidCursor, Newsletter, NewsletterConfig
 from .routes import _db, _email, _list_args, _post_list_url, _post_url, _send_test_email, _unsubscribe_url_template
+
+
+def _section_from_form() -> tuple[str, str]:
+    try:
+        position = normalize_section_position(request.form.get("section_position", "append"))
+    except ValueError:
+        abort(400)
+    return request.form.get("section_md", ""), position
 
 
 def _slugify(text: str) -> str:
@@ -171,6 +182,7 @@ def register_admin_routes(bp: Blueprint) -> None:
             return redirect(url_for(f"{name}.edit_post", newsletter_slug=newsletter_slug, post_slug=post_slug))
 
         if post.sent_at is None:
+            section_md, section_position = _section_from_form()
             subscribers = _db().list_confirmed_subscribers(newsletter_slug)
             config = _db().get_newsletter_config(newsletter.id)
             _email().send_post(
@@ -181,6 +193,8 @@ def register_admin_routes(bp: Blueprint) -> None:
                 config,
                 post_url=_post_url(name, newsletter_slug, post_slug),
                 post_list_url=_post_list_url(name, newsletter_slug),
+                section_md=section_md,
+                section_position=section_position,
             )
             _db().mark_sent(post.id)
             _db().log_event(
@@ -216,26 +230,63 @@ def register_admin_routes(bp: Blueprint) -> None:
         )
         return redirect(url_for(f"{name}.dashboard", newsletter_slug=newsletter_slug))
 
+    def _subscriber_page(newsletter: Newsletter, invite_error: str | None = None, status: int = 200):
+        limit, cursor, partial = _list_args()
+        try:
+            page = _db().list_all_subscribers(newsletter.slug, limit=limit, before=cursor)
+        except InvalidCursor:
+            abort(400)
+        confirmed_count = len(_db().list_confirmed_subscribers(newsletter.slug))
+        rendered = render_template(
+            "quillet/admin/_subscriber_rows.html" if partial else "quillet/admin/subscribers.html",
+            newsletter=newsletter,
+            subscribers=page.items,
+            next_cursor=page.next_cursor,
+            confirmed_count=confirmed_count,
+            invite_error=invite_error,
+        )
+        if status == 200:
+            return rendered
+        return rendered, status
+
     @bp.get("/<newsletter_slug>/admin/subscribers")
     @require_basic_auth
     def subscriber_list(newsletter_slug: str):
         newsletter = _db().get_newsletter(newsletter_slug)
         if newsletter is None:
             abort(404)
+        return _subscriber_page(newsletter)
 
-        limit, cursor, partial = _list_args()
-        try:
-            page = _db().list_all_subscribers(newsletter_slug, limit=limit, before=cursor)
-        except InvalidCursor:
-            abort(400)
-        confirmed_count = len(_db().list_confirmed_subscribers(newsletter_slug))
-        return render_template(
-            "quillet/admin/_subscriber_rows.html" if partial else "quillet/admin/subscribers.html",
-            newsletter=newsletter,
-            subscribers=page.items,
-            next_cursor=page.next_cursor,
-            confirmed_count=confirmed_count,
+    @bp.post("/<newsletter_slug>/admin/subscribers/invite")
+    @require_basic_auth
+    def invite_subscriber(newsletter_slug: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        payload, status = api_ops.invite_subscriber(
+            current_app._get_current_object(),
+            newsletter_slug,
+            email=request.form.get("email", ""),
+            body_md=request.form.get("body_md", ""),
+            reset=request.form.get("reset") == "1",
         )
+        if status >= 400:
+            message = payload.get("error", "Invite failed.")
+            return _subscriber_page(newsletter, invite_error=str(message), status=status)
+        return redirect(url_for(f"{name}.subscriber_list", newsletter_slug=newsletter_slug))
+
+    @bp.post("/<newsletter_slug>/admin/subscribers/<int:subscriber_id>/reset")
+    @require_basic_auth
+    def reset_confirmation(newsletter_slug: str, subscriber_id: int):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        _payload, status = api_ops.reset_subscriber(_db(), newsletter_slug, subscriber_id)
+        if status >= 400:
+            abort(status)
+        return redirect(url_for(f"{name}.subscriber_list", newsletter_slug=newsletter_slug))
 
     @bp.post("/<newsletter_slug>/admin/subscribers/<int:subscriber_id>/delete")
     @require_basic_auth
@@ -326,7 +377,16 @@ def register_admin_routes(bp: Blueprint) -> None:
         if not test_email:
             test_email = newsletter.reply_to or newsletter.from_email
 
-        _send_test_email(newsletter, post, test_email, name, newsletter_slug)
+        section_md, section_position = _section_from_form()
+        _send_test_email(
+            newsletter,
+            post,
+            test_email,
+            name,
+            newsletter_slug,
+            section_md=section_md,
+            section_position=section_position,
+        )
 
         return redirect(
             url_for(f"{name}.edit_post", newsletter_slug=newsletter_slug, post_slug=post_slug, test_sent="1")

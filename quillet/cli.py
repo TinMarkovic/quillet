@@ -71,7 +71,9 @@ def list_newsletters() -> None:
 @click.argument("newsletter_slug")
 @click.argument("post_slug")
 @click.option("--force", is_flag=True, default=False, help="Re-send even if already sent.")
-def send_post(newsletter_slug: str, post_slug: str, force: bool) -> None:
+@click.option("--section", default="", help="Markdown included in this send only. Not saved on the post.")
+@click.option("--prepend", is_flag=True, default=False, help="Place --section before the post instead of after.")
+def send_post(newsletter_slug: str, post_slug: str, force: bool, section: str, prepend: bool) -> None:
     """Send a published post to all confirmed subscribers."""
     from .email import EmailSender
 
@@ -103,7 +105,14 @@ def send_post(newsletter_slug: str, post_slug: str, force: bool) -> None:
     with current_app.test_request_context("/"):
         unsubscribe_template = _unsubscribe_url_template(bp_name, newsletter_slug)
 
-    email_sender.send_post(newsletter, post, subscribers, unsubscribe_template)
+    email_sender.send_post(
+        newsletter,
+        post,
+        subscribers,
+        unsubscribe_template,
+        section_md=section,
+        section_position="prepend" if prepend else "append",
+    )
     db.mark_sent(post.id)
     click.echo("Done.")
 

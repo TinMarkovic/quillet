@@ -34,6 +34,44 @@ def build_post_body_md(
     return f"{header}\n\n{post.body_md}"
 
 
+def normalize_section_position(position: str) -> str:
+    cleaned = (position or "append").strip() or "append"
+    if cleaned not in ("append", "prepend"):
+        raise ValueError("section_position must be 'append' or 'prepend'")
+    return cleaned
+
+
+def apply_send_section(full_md: str, section_md: str, position: str) -> str:
+    """Splice a one-send blurb around the post markdown, outside the footer."""
+    cleaned = (section_md or "").strip()
+    if not cleaned:
+        return full_md
+    place = normalize_section_position(position)
+    if place == "prepend":
+        return f"{cleaned}\n\n{full_md}"
+    return f"{full_md}\n\n{cleaned}"
+
+
+def render_invite_md(body_md: str | None, newsletter_name: str, confirm_url: str) -> str | None:
+    """Return invite markdown, or None to keep the stock confirmation opener.
+
+    `{confirm_url}` and `{newsletter_name}` are substituted when present.
+    A body that never mentions the confirm URL gets the link appended.
+    """
+    if body_md is None or not body_md.strip():
+        return None
+    source = body_md.strip()
+    rendered = source
+    if "{confirm_url}" in source or "{newsletter_name}" in source:
+        try:
+            rendered = source.format(newsletter_name=newsletter_name, confirm_url=confirm_url)
+        except (KeyError, ValueError, IndexError) as exc:
+            raise ValueError("Invite placeholders are {confirm_url} and {newsletter_name} only.") from exc
+    if confirm_url not in rendered:
+        rendered = f"{rendered}\n\n[Confirm subscription]({confirm_url})"
+    return rendered
+
+
 def md_to_plain(md: str) -> str:
     """Convert markdown to a clean plain-text string for email text/plain parts."""
     raw_html = markdown2.markdown(md)

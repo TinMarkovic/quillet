@@ -1,7 +1,8 @@
 {% extends "quillet/base.html" %}
 
 {% block title %}
-  {% if state == 'confirmed' %}Subscribed!
+  {% if state == 'confirm' %}Confirm subscription?
+  {% elif state == 'confirmed' %}Subscribed!
   {% elif state == 'pending' %}Check your email
   {% elif state == 'unsubscribed' %}Unsubscribed
   {% else %}Invalid link
@@ -9,7 +10,15 @@
 {% endblock %}
 
 {% block content %}
-  {% if state == 'pending' %}
+  {% if state == 'confirm' %}
+    <h1>Confirm subscription?</h1>
+    <p>Add this address to <strong>{{ newsletter.name }}</strong>?</p>
+    <form method="post" action="{{ url_for('quillet.confirm_subscription', newsletter_slug=newsletter.slug, token=token) }}">
+      <button class="btn" type="submit">Yes, subscribe</button>
+      <a class="btn btn-secondary" href="{{ url_for('quillet.post_list', newsletter_slug=newsletter.slug) }}">Cancel</a>
+    </form>
+
+  {% elif state == 'pending' %}
     <h1>Check your email</h1>
     <p>We've sent a confirmation link to your address. Click it to complete your subscription to <strong>{{ newsletter.name }}</strong>.</p>
 

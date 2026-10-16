@@ -3,7 +3,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from ..models import Newsletter, NewsletterConfig, Post, Subscriber
-from ._utils import build_post_body_md, md_to_html, md_to_plain
+from ._utils import apply_send_section, build_post_body_md, md_to_html, md_to_plain, render_invite_md
 
 _DEFAULT_OPENER_TEXT = (
     "Hi,\n\n"
@@ -101,8 +101,13 @@ class SmtpSender:
         subscriber: Subscriber,
         confirm_url: str,
         config: NewsletterConfig | None = None,
+        body_md: str | None = None,
     ) -> None:
-        opener_text, opener_html = _render_opener(config, newsletter.name, confirm_url)
+        custom = render_invite_md(body_md, newsletter.name, confirm_url)
+        if custom is None:
+            opener_text, opener_html = _render_opener(config, newsletter.name, confirm_url)
+        else:
+            opener_text, opener_html = md_to_plain(custom), md_to_html(custom)
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = self._subject(f"Confirm your subscription to {newsletter.name}", config)
@@ -125,6 +130,8 @@ class SmtpSender:
         config: NewsletterConfig | None = None,
         post_url: str = "",
         post_list_url: str = "",
+        section_md: str = "",
+        section_position: str = "append",
     ) -> None:
         """
         Sends one email per subscriber (no batch merge — SMTP has no built-in
@@ -134,7 +141,11 @@ class SmtpSender:
             return
 
         reply_to = newsletter.reply_to or newsletter.from_email
-        full_md = build_post_body_md(post, newsletter.name, config, post_url, post_list_url)
+        full_md = apply_send_section(
+            build_post_body_md(post, newsletter.name, config, post_url, post_list_url),
+            section_md,
+            section_position,
+        )
         body_text = md_to_plain(full_md)
         body_html = md_to_html(full_md)
 

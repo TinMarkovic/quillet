@@ -21,7 +21,17 @@ from . import api_ops
 from .auth import require_basic_auth
 from .db import NewsletterRepository
 from .email import EmailSender
-from .models import PAGE_MAX, PAGE_SIZE, RSS_LIMIT, InvalidCursor, Newsletter, Post, Subscriber, clamp_limit
+from .models import (
+    PAGE_MAX,
+    PAGE_SIZE,
+    RSS_LIMIT,
+    InvalidCursor,
+    Newsletter,
+    Post,
+    Subscriber,
+    clamp_limit,
+    is_pending_expired,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers (used by admin.py too)
@@ -127,6 +137,8 @@ def _send_test_email(
     test_email: str,
     bp_name: str,
     newsletter_slug: str,
+    section_md: str = "",
+    section_position: str = "append",
 ) -> None:
     test_subscriber = Subscriber(
         id=0,
@@ -147,7 +159,17 @@ def _send_test_email(
         test_config,
         post_url=_post_url(bp_name, newsletter_slug, post.slug),
         post_list_url=_post_list_url(bp_name, newsletter_slug),
+        section_md=section_md,
+        section_position=section_position,
     )
+
+
+def _confirm_state(subscriber: Subscriber | None) -> str:
+    if subscriber is None or is_pending_expired(subscriber.created_at, subscriber.confirmed_at):
+        return "invalid"
+    if subscriber.confirmed_at is not None:
+        return "confirmed"
+    return "confirm"
 
 
 # ---------------------------------------------------------------------------
@@ -359,29 +381,54 @@ def register_public_routes(bp: Blueprint) -> None:
         )
 
     @bp.get("/<newsletter_slug>/confirm/<token>")
+    def confirm_form(newsletter_slug: str, token: str):
+        newsletter = _db().get_newsletter(newsletter_slug)
+        if newsletter is None:
+            abort(404)
+
+        if _wants_json():
+            response = jsonify(error="POST required to confirm.")
+            return response, 405, {"Allow": "POST"}
+
+        subscriber = _db().get_subscriber_by_token(token)
+        if subscriber is not None:
+            _db().purge_expired_pending(subscriber.newsletter_id)
+            subscriber = _db().get_subscriber_by_token(token)
+
+        return render_template(
+            "quillet/subscribe_confirm.html",
+            newsletter=newsletter,
+            token=token,
+            state=_confirm_state(subscriber),
+        )
+
+    @bp.post("/<newsletter_slug>/confirm/<token>")
     def confirm_subscription(newsletter_slug: str, token: str):
         newsletter = _db().get_newsletter(newsletter_slug)
         if newsletter is None:
             abort(404)
 
-        subscriber = _db().confirm_subscriber(token)
-
-        if subscriber:
-            _db().log_event(
-                "confirm",
-                json.dumps({"email": subscriber.email, "newsletter_slug": newsletter_slug}),
-                newsletter_id=newsletter.id,
-            )
+        subscriber = _db().get_subscriber_by_token(token)
+        already_confirmed = subscriber is not None and subscriber.confirmed_at is not None
+        if subscriber is not None and not already_confirmed:
+            subscriber = _db().confirm_subscriber(token)
+            if subscriber is not None:
+                _db().log_event(
+                    "confirm",
+                    json.dumps({"email": subscriber.email, "newsletter_slug": newsletter_slug}),
+                    newsletter_id=newsletter.id,
+                )
 
         if _wants_json():
-            if subscriber is None:
+            if subscriber is None or subscriber.confirmed_at is None:
                 return jsonify(error="Invalid or expired token."), 404
             return jsonify(ok=True)
 
         return render_template(
             "quillet/subscribe_confirm.html",
             newsletter=newsletter,
-            state="confirmed" if subscriber else "invalid",
+            token=token,
+            state="confirmed" if subscriber is not None and subscriber.confirmed_at is not None else "invalid",
         )
 
     @bp.get("/<newsletter_slug>/unsubscribe/<token>")
@@ -560,16 +607,21 @@ def register_public_routes(bp: Blueprint) -> None:
             newsletter_slug,
             post_slug,
             email=data.get("email") or "",
+            section_md=data.get("section_md") or "",
+            section_position=data.get("section_position") or "append",
         )
         return jsonify(payload), status
 
     @bp.post("/<newsletter_slug>/api/posts/<post_slug>/send")
     @require_basic_auth
     def api_send_post(newsletter_slug: str, post_slug: str):
+        data = request.get_json(silent=True) or {}
         payload, status = api_ops.send_post(
             current_app._get_current_object(),
             newsletter_slug,
             post_slug,
+            section_md=data.get("section_md") or "",
+            section_position=data.get("section_position") or "append",
         )
         return jsonify(payload), status
 
@@ -597,6 +649,25 @@ def register_public_routes(bp: Blueprint) -> None:
 
         _db().delete_post(post.id)
         return jsonify(ok=True)
+
+    @bp.post("/<newsletter_slug>/api/subscribers/invite")
+    @require_basic_auth
+    def api_invite_subscriber(newsletter_slug: str):
+        data = request.get_json(silent=True) or {}
+        payload, status = api_ops.invite_subscriber(
+            current_app._get_current_object(),
+            newsletter_slug,
+            email=data.get("email") or "",
+            body_md=data.get("body_md") or "",
+            reset=data.get("reset", False),
+        )
+        return jsonify(payload), status
+
+    @bp.post("/<newsletter_slug>/api/subscribers/<int:subscriber_id>/reset")
+    @require_basic_auth
+    def api_reset_subscriber(newsletter_slug: str, subscriber_id: int):
+        payload, status = api_ops.reset_subscriber(_db(), newsletter_slug, subscriber_id)
+        return jsonify(payload), status
 
     @bp.delete("/<newsletter_slug>/api/subscribers/<int:subscriber_id>")
     @require_basic_auth

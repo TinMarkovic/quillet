@@ -37,6 +37,8 @@ CURATED_TOOL_NAMES = (
     "send_test",
     "send_post",
     "list_subscribers",
+    "invite_subscriber",
+    "reset_subscriber",
 )
 
 
@@ -108,24 +110,46 @@ def build_mcp(app: Flask, newsletter_slug: str) -> FastMCP:
         return _result(payload, code)
 
     @mcp.tool()
-    def send_test(post_slug: str, email: str) -> str:
+    def send_test(
+        post_slug: str,
+        email: str,
+        section_md: str = "",
+        section_position: str = "append",
+    ) -> str:
         """Email this post to a single address for preview. Does not mark the post as sent
         (sent_at remains null) and does not email the subscriber list.
 
-        Prefer this over full send when you only need a personal preview."""
-        payload, code = api_ops.send_test(app, newsletter_slug, post_slug, email)
+        section_md is included in this email only (append or prepend) and is not saved
+        on the post. Prefer this over full send when you only need a personal preview."""
+        payload, code = api_ops.send_test(
+            app,
+            newsletter_slug,
+            post_slug,
+            email,
+            section_md=section_md,
+            section_position=section_position,
+        )
         return _result(payload, code)
 
     @mcp.tool()
-    def send_post(post_slug: str) -> str:
+    def send_post(post_slug: str, section_md: str = "", section_position: str = "append") -> str:
         """Email the post to every confirmed subscriber and set sent_at.
 
         Requirements:
         - Post must already be published (published_at set) — otherwise 400.
         - Post must not already have been sent (sent_at null) — otherwise 409.
 
+        section_md is the same extra markdown for every recipient of this send.
+        section_position is append (default) or prepend. It is not saved on the post.
+
         Do not use this when you only want a personal preview; use send_test instead."""
-        payload, code = api_ops.send_post(app, newsletter_slug, post_slug)
+        payload, code = api_ops.send_post(
+            app,
+            newsletter_slug,
+            post_slug,
+            section_md=section_md,
+            section_position=section_position,
+        )
         return _result(payload, code)
 
     @mcp.tool()
@@ -135,6 +159,31 @@ def build_mcp(app: Flask, newsletter_slug: str) -> FastMCP:
         Pass cursor from next_cursor for the next older page. Inspect confirmed_at —
         null means the double opt-in is still pending."""
         payload, code = api_ops.list_subscribers(_db(), newsletter_slug, cursor=cursor or None)
+        return _result(payload, code)
+
+    @mcp.tool()
+    def invite_subscriber(email: str, body_md: str = "", reset: bool = False) -> str:
+        """Email a personal confirm link. body_md replaces the stock confirmation text.
+
+        Creates a pending subscriber when the address is new. Resends when they are
+        still pending. Already-confirmed addresses return 409 unless reset is true,
+        which clears confirmation and sends the invite again. The note is not stored."""
+        payload, code = api_ops.invite_subscriber(
+            app,
+            newsletter_slug,
+            email,
+            body_md,
+            reset=reset,
+        )
+        return _result(payload, code)
+
+    @mcp.tool()
+    def reset_subscriber(subscriber_id: int) -> str:
+        """Clear confirmation and restart the 3-day pending clock. Does not send email.
+
+        The confirm link stays the same URL. GET no longer confirms; they must POST.
+        Use invite_subscriber with reset=true when you also want to email them."""
+        payload, code = api_ops.reset_subscriber(_db(), newsletter_slug, subscriber_id)
         return _result(payload, code)
 
     return mcp

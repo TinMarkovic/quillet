@@ -17,6 +17,7 @@ class NoopSender:
         subscriber: Subscriber,
         confirm_url: str,
         config: NewsletterConfig | None = None,
+        body_md: str | None = None,
     ) -> None:
         logger.info(
             "NOOP confirmation | newsletter=%s to=%s confirm_url=%s",
@@ -34,6 +35,8 @@ class NoopSender:
         config: NewsletterConfig | None = None,
         post_url: str = "",
         post_list_url: str = "",
+        section_md: str = "",
+        section_position: str = "append",
     ) -> None:
         logger.info(
             "NOOP send_post | newsletter=%s post=%s recipients=%d",

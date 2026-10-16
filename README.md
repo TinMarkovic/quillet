@@ -136,7 +136,8 @@ All routes are prefixed with `/<newsletter_slug>/`.
 | `GET` | `/<slug>/` | Post archive. HTML, JSON (`Accept: application/json`), or markdown. `?cursor=` + `?limit=` (default 20, max 100). |
 | `GET` | `/<slug>/posts/<post_slug>` | Single post. HTML, JSON, or markdown (`Accept: text/markdown`). |
 | `POST` | `/<slug>/subscribe` | Subscribe. Accepts form `email` or JSON `{"email": "..."}`. Sends double opt-in email. |
-| `GET` | `/<slug>/confirm/<token>` | Confirm subscription via emailed link. Pending confirms expire after 3 days. |
+| `GET` | `/<slug>/confirm/<token>` | Confirm form (no write). JSON GET → 405. Pending rows expire after 3 days. |
+| `POST` | `/<slug>/confirm/<token>` | Confirm the subscription. A second POST does not rewrite `confirmed_at`. |
 | `GET` | `/<slug>/unsubscribe/<token>` | Confirm form (no write). JSON GET → 405. |
 | `POST` | `/<slug>/unsubscribe/<token>` | Unsubscribe. |
 | `GET` | `/<slug>/feed.xml` | RSS 2.0 of the latest 50 published posts. |
@@ -151,9 +152,11 @@ All routes are prefixed with `/<newsletter_slug>/`.
 | `GET/POST` | `/<slug>/admin/posts/new` | Create post form. |
 | `GET/POST` | `/<slug>/admin/posts/<post_slug>/edit` | Edit post. Publish and Send buttons are inline. |
 | `POST` | `/<slug>/admin/posts/<post_slug>/publish` | Publish (sets `published_at`). |
-| `POST` | `/<slug>/admin/posts/<post_slug>/send` | Send to all confirmed subscribers. Idempotent — a sent post cannot be re-sent. |
+| `POST` | `/<slug>/admin/posts/<post_slug>/send` | Send to all confirmed subscribers. Optional form fields `section_md` and `section_position` (`append` or `prepend`) are email-only. A sent post cannot be re-sent. |
 | `POST` | `/<slug>/admin/posts/<post_slug>/delete` | Delete a post. Warns if the post was already sent. |
-| `GET` | `/<slug>/admin/subscribers` | Subscriber list with confirmation status. |
+| `GET` | `/<slug>/admin/subscribers` | Subscriber list with confirmation status, plus an invite form. |
+| `POST` | `/<slug>/admin/subscribers/invite` | Email a personal confirm link. Form fields `email`, `body_md`, `reset=1`. |
+| `POST` | `/<slug>/admin/subscribers/<id>/reset` | Clear confirmation. No email. |
 | `POST` | `/<slug>/admin/subscribers/<id>/delete` | Hard-delete a subscriber. |
 
 ### JSON API (Basic Auth)
@@ -167,10 +170,12 @@ All routes are prefixed with `/<newsletter_slug>/`.
 | `POST` | `/<slug>/api/posts` | `{"title", "slug", "body_md"}` → `{"post": {...}}` |
 | `PUT` | `/<slug>/api/posts/<post_slug>` | `{"title", "body_md", "slug?"}` → `{"post": {...}}` |
 | `POST` | `/<slug>/api/posts/<post_slug>/publish` | → `{"post": {...}}` |
-| `POST` | `/<slug>/api/posts/<post_slug>/send-test` | `{"email"}` → `{"ok": true}` (does not set `sent_at`) |
-| `POST` | `/<slug>/api/posts/<post_slug>/send` | → `{"ok": true, "recipients": N}` |
+| `POST` | `/<slug>/api/posts/<post_slug>/send-test` | `{"email", "section_md?", "section_position?"}` → `{"ok": true}` (does not set `sent_at`) |
+| `POST` | `/<slug>/api/posts/<post_slug>/send` | Optional `{"section_md", "section_position"}` → `{"ok": true, "recipients": N}`. Unknown position → 400, `sent_at` unchanged. |
 | `DELETE` | `/<slug>/api/posts/<post_slug>` | → `{"ok": true}` |
 | `GET` | `/<slug>/api/subscribers` | `?cursor=` `&limit=` → `{"subscribers": [...], "next_cursor": ...}` |
+| `POST` | `/<slug>/api/subscribers/invite` | `{"email", "body_md?", "reset?"}` → 201 new, 200 refreshed, 409 already confirmed |
+| `POST` | `/<slug>/api/subscribers/<id>/reset` | → `{"ok": true, "subscriber": {...}}`. No email. Other newsletter's id → 404. |
 | `DELETE` | `/<slug>/api/subscribers/<id>` | → `{"ok": true}` |
 
 ### MCP (optional extra)
@@ -204,6 +209,9 @@ flask quillet list
 
 # Send a published post
 flask quillet send blog my-post-slug
+
+# Email-only note for this send (not saved on the post). --prepend places it first.
+flask quillet send blog my-post-slug --section "See you Thursday."
 
 # Force re-send (already sent posts are blocked by default)
 flask quillet send blog my-post-slug --force
@@ -250,6 +258,8 @@ class MyRepository:
         self, newsletter_slug: str, *, limit: int = 20, before: str | None = None
     ) -> Page: ...
     def purge_expired_pending(self, newsletter_id: int) -> int: ...
+    def find_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None: ...
+    def reset_confirmation(self, newsletter_id: int, subscriber_id: int, *, resubscribe: bool = False) -> Subscriber | None: ...
     def unsubscribe(self, token: str) -> None: ...
     def delete_subscriber(self, subscriber_id: int) -> None: ...
     def create_newsletter(self, slug: str, name: str, from_email: str, from_name: str, reply_to: str | None) -> Newsletter: ...
@@ -259,7 +269,7 @@ class MyRepository:
 
 ```python
 from quillet.email import EmailSender
-from quillet.models import Newsletter, Post, Subscriber
+from quillet.models import Newsletter, NewsletterConfig, Post, Subscriber
 
 class MyEmailSender:
     def send_confirmation(
@@ -267,6 +277,8 @@ class MyEmailSender:
         newsletter: Newsletter,
         subscriber: Subscriber,
         confirm_url: str,
+        config: NewsletterConfig | None = None,
+        body_md: str | None = None,  # personal invite; None uses the stock opener
     ) -> None: ...
 
     def send_post(
@@ -275,6 +287,11 @@ class MyEmailSender:
         post: Post,
         subscribers: list[Subscriber],
         unsubscribe_url_template: str,  # contains {token} placeholder
+        config: NewsletterConfig | None = None,
+        post_url: str = "",
+        post_list_url: str = "",
+        section_md: str = "",  # this send only; not saved on the post
+        section_position: str = "append",  # or "prepend"
     ) -> None: ...
 ```
 

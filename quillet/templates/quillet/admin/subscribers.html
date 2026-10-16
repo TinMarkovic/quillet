@@ -19,6 +19,24 @@
 
 <p class="muted">{{ confirmed_count }} confirmed</p>
 
+{% if invite_error %}
+  <p class="error" style="color:#cc0000;">{{ invite_error }}</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('quillet.invite_subscriber', newsletter_slug=newsletter.slug) }}" style="margin-bottom:1.5rem;">
+  <label for="invite_email" style="font-weight:600;display:block;margin-bottom:0.3rem;">Invite</label>
+  <input type="email" id="invite_email" name="email" placeholder="person@example.com" required
+         style="padding:0.5rem;border:1px solid #ccc;border-radius:4px;width:100%;max-width:28rem;">
+  <label for="invite_body" style="font-weight:600;display:block;margin:0.8rem 0 0.3rem;">Note (optional)</label>
+  <textarea id="invite_body" name="body_md" style="width:100%;max-width:36rem;min-height:6rem;font-family:monospace;"></textarea>
+  <p class="hint" style="font-size:0.85em;color:#666;">Personal text for this email only. Use {confirm_url} if you want the link in a specific place.</p>
+  <label style="display:block;margin:0.6rem 0;">
+    <input type="checkbox" name="reset" value="1">
+    Reset confirmation if they are already subscribed
+  </label>
+  <button class="btn" type="submit">Send invite</button>
+</form>
+
 {% if subscribers %}
 <table>
   <thead>

@@ -17,6 +17,7 @@
     font-family: inherit; font-size: 1em;
   }
   textarea { font-family: monospace; font-size: 0.9em; min-height: 400px; resize: vertical; }
+  textarea.section-md { min-height: 6rem; }
   .hint { font-size: 0.85em; color: #666; margin-top: 0.2rem; }
   .error { color: #cc0000; padding: 0.75rem; background: #fff0f0; border-radius: 4px; margin-bottom: 1rem; }
   .post-meta { background: #f5f5f5; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1.5rem; font-size: 0.9em; }
@@ -77,7 +78,17 @@
   {% if post and post.published_at and not post.sent_at %}
     <form method="post" action="{{ url_for('quillet.send_post', newsletter_slug=newsletter.slug, post_slug=post.slug) }}"
           onsubmit="return confirm('Send this post to all confirmed subscribers?')">
-      <button type="submit" class="btn" style="background:#0077aa;">Send newsletter</button>
+      <label for="send_section_md" style="font-weight:600;display:block;margin-bottom:0.4rem;">Email-only note</label>
+      <textarea id="send_section_md" name="section_md" class="section-md" style="min-height:6rem;"></textarea>
+      <p class="hint">Included in this send only. Not saved on the post.</p>
+      <label for="send_section_position" style="font-weight:600;display:block;margin:0.6rem 0 0.4rem;">Placement</label>
+      <select id="send_section_position" name="section_position">
+        <option value="append" selected>Append</option>
+        <option value="prepend">Prepend</option>
+      </select>
+      <div style="margin-top:0.75rem;">
+        <button type="submit" class="btn" style="background:#0077aa;">Send newsletter</button>
+      </div>
     </form>
   {% endif %}
 
@@ -97,6 +108,14 @@
              style="flex:1;">
       <button type="submit" class="btn">Send test</button>
     </div>
+    <label for="test_section_md" style="font-weight:600;display:block;margin:0.8rem 0 0.4rem;">Email-only note</label>
+    <textarea id="test_section_md" name="section_md" class="section-md" style="min-height:6rem;"></textarea>
+    <p class="hint">Included in this test email only. Not saved on the post.</p>
+    <label for="test_section_position" style="font-weight:600;display:block;margin:0.6rem 0 0.4rem;">Placement</label>
+    <select id="test_section_position" name="section_position">
+      <option value="append" selected>Append</option>
+      <option value="prepend">Prepend</option>
+    </select>
     {% if request.args.get('test_sent') %}
       <p class="hint" style="color:#1a7f37;margin-top:0.4rem;">Test email sent.</p>
     {% endif %}

@@ -10,6 +10,7 @@ class EmailSender(Protocol):
         subscriber: Subscriber,
         confirm_url: str,
         config: NewsletterConfig | None = None,
+        body_md: str | None = None,
     ) -> None: ...
 
     def send_post(
@@ -21,4 +22,6 @@ class EmailSender(Protocol):
         config: NewsletterConfig | None = None,
         post_url: str = "",
         post_list_url: str = "",
+        section_md: str = "",
+        section_position: str = "append",
     ) -> None: ...

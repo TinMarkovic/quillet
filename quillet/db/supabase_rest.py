@@ -381,6 +381,40 @@ class SupabaseRestRepository:
 
     # --- Subscriber lookup ---
 
+    def find_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
+        self.purge_expired_pending(newsletter_id)
+        rows = self._get(
+            "subscribers",
+            {
+                "newsletter_id": f"eq.{newsletter_id}",
+                "email": f"eq.{email}",
+                "order": "id.desc",
+                "limit": "1",
+            },
+        )
+        if not rows:
+            return None
+        return self._row_to_subscriber(rows[0])
+
+    def reset_confirmation(
+        self,
+        newsletter_id: int,
+        subscriber_id: int,
+        *,
+        resubscribe: bool = False,
+    ) -> Subscriber | None:
+        rows = self._get(
+            "subscribers",
+            {"id": f"eq.{subscriber_id}", "newsletter_id": f"eq.{newsletter_id}", "limit": "1"},
+        )
+        if not rows:
+            return None
+        data: dict = {"confirmed_at": None, "created_at": _fmt_dt(datetime.now(timezone.utc))}
+        if resubscribe:
+            data["unsubscribed"] = False
+        row = self._patch("subscribers", {"id": subscriber_id, "newsletter_id": newsletter_id}, data)
+        return self._row_to_subscriber(row)
+
     def get_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
         self.purge_expired_pending(newsletter_id)
         rows = self._get(

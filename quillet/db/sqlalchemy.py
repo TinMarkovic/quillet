@@ -12,9 +12,12 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     and_,
+    case,
+    cast,
     create_engine,
     delete,
     event,
+    func,
     inspect,
     or_,
     select,
@@ -194,7 +197,37 @@ def _filter_posts(query, published_only: bool, status: str | None):
     return query
 
 
-def _apply_post_cursor(query, published_only: bool, before: str | None):
+def _sort_timestamp(column, sqlite: bool):
+    """Keyset timestamp expression.
+
+    SQLite stores datetimes as text. SQLAlchemy's bind always writes six
+    fractional digits; CURRENT_TIMESTAMP does not. Pad the short form so
+    equality and ORDER BY use one fixed-width string.
+    """
+    if not sqlite:
+        return column
+    # ponytail: text pad, not a column rewrite. Ceiling is mixed separators
+    # (T vs space, offsets). Upgrade path: store one format and compare natively.
+    text_col = cast(column, String)
+    return case(
+        (func.instr(text_col, ".") == 0, text_col.op("||")(".000000")),
+        else_=text_col,
+    )
+
+
+def _cursor_text(value: datetime) -> str:
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
+def _before_timestamp(column, id_column, when: datetime, row_id: int, sqlite: bool):
+    key = _sort_timestamp(column, sqlite)
+    bound: datetime | str = _cursor_text(when) if sqlite else when
+    return or_(key < bound, and_(key == bound, id_column < row_id))
+
+
+def _apply_post_cursor(query, published_only: bool, before: str | None, *, sqlite: bool):
     if not before:
         return query
     parts = decode_cursor(before)
@@ -204,12 +237,7 @@ def _apply_post_cursor(query, published_only: bool, before: str | None):
                 raise InvalidCursor("invalid cursor")
             published_at = datetime.fromisoformat(parts[1])
             post_id = int(parts[2])
-            return query.where(
-                or_(
-                    _posts.c.published_at < published_at,
-                    and_(_posts.c.published_at == published_at, _posts.c.id < post_id),
-                )
-            )
+            return query.where(_before_timestamp(_posts.c.published_at, _posts.c.id, published_at, post_id, sqlite))
         if len(parts) != 2 or parts[0] != "i":
             raise InvalidCursor("invalid cursor")
         return query.where(_posts.c.id < int(parts[1]))
@@ -331,6 +359,7 @@ class SQLAlchemyRepository:
         status: str | None = None,
     ) -> Page:
         page_size = clamp_limit(limit)
+        sqlite = self._engine.dialect.name == "sqlite"
         with self._engine.connect() as conn:
             newsletter = conn.execute(select(_newsletters).where(_newsletters.c.slug == newsletter_slug)).one_or_none()
             if newsletter is None:
@@ -338,9 +367,10 @@ class SQLAlchemyRepository:
 
             query = select(_posts).where(_posts.c.newsletter_id == newsletter.id)
             query = _filter_posts(query, published_only=published_only, status=status)
-            query = _apply_post_cursor(query, published_only=published_only, before=before)
+            query = _apply_post_cursor(query, published_only=published_only, before=before, sqlite=sqlite)
             if published_only:
-                query = query.order_by(_posts.c.published_at.desc(), _posts.c.id.desc())
+                published_key = _sort_timestamp(_posts.c.published_at, sqlite)
+                query = query.order_by(published_key.desc(), _posts.c.id.desc())
             else:
                 query = query.order_by(_posts.c.id.desc())
             rows = conn.execute(query.limit(page_size + 1)).fetchall()
@@ -476,6 +506,7 @@ class SQLAlchemyRepository:
             newsletter_id = newsletter.id
         self.purge_expired_pending(newsletter_id)
         page_size = clamp_limit(limit)
+        sqlite = self._engine.dialect.name == "sqlite"
         query = select(_subscribers).where(_subscribers.c.newsletter_id == newsletter_id)
         if before:
             parts = decode_cursor(before)
@@ -489,12 +520,10 @@ class SQLAlchemyRepository:
             except (TypeError, ValueError) as exc:
                 raise InvalidCursor("invalid cursor") from exc
             query = query.where(
-                or_(
-                    _subscribers.c.created_at < created_at,
-                    and_(_subscribers.c.created_at == created_at, _subscribers.c.id < sub_id),
-                )
+                _before_timestamp(_subscribers.c.created_at, _subscribers.c.id, created_at, sub_id, sqlite)
             )
-        query = query.order_by(_subscribers.c.created_at.desc(), _subscribers.c.id.desc()).limit(page_size + 1)
+        created_key = _sort_timestamp(_subscribers.c.created_at, sqlite)
+        query = query.order_by(created_key.desc(), _subscribers.c.id.desc()).limit(page_size + 1)
         with self._engine.connect() as conn:
             rows = conn.execute(query).fetchall()
         items = [_row_to_subscriber(r) for r in rows[:page_size]]
@@ -545,6 +574,39 @@ class SQLAlchemyRepository:
             )
 
     # --- Subscriber lookup ---
+
+    def find_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
+        self.purge_expired_pending(newsletter_id)
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(_subscribers)
+                .where((_subscribers.c.newsletter_id == newsletter_id) & (_subscribers.c.email == email))
+                .order_by(_subscribers.c.id.desc())
+            ).first()
+        if row is None:
+            return None
+        return _row_to_subscriber(row)
+
+    def reset_confirmation(
+        self,
+        newsletter_id: int,
+        subscriber_id: int,
+        *,
+        resubscribe: bool = False,
+    ) -> Subscriber | None:
+        values: dict = {"confirmed_at": None, "created_at": _utc_now()}
+        if resubscribe:
+            values["unsubscribed"] = False
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                update(_subscribers)
+                .where((_subscribers.c.id == subscriber_id) & (_subscribers.c.newsletter_id == newsletter_id))
+                .values(**values)
+            )
+            if not result.rowcount:
+                return None
+            row = conn.execute(select(_subscribers).where(_subscribers.c.id == subscriber_id)).one()
+        return _row_to_subscriber(row)
 
     def get_subscriber_by_email(self, newsletter_id: int, email: str) -> Subscriber | None:
         self.purge_expired_pending(newsletter_id)
